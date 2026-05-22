@@ -123,7 +123,7 @@ def _predict_test(model, cfg, data_cfg, transform, device, logger):
     out_dir = cfg["output"]["dir"]
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "test_predictions.csv")
-    pd.DataFrame({"filename": all_filenames, "FaceOcclusion": all_preds}).to_csv(out_path, index=False)
+    pd.DataFrame({"filename": all_filenames, "FaceOcclusion": all_preds, "gender": "x"}).to_csv(out_path, index=False)
     logger.info("Predictions saved to %s", out_path)
 
 

@@ -17,6 +17,7 @@ from tqdm import tqdm
 from data_challenge.data.dataset import OcclusionDataset, get_transforms
 from data_challenge.models.cnn_baseline import CNNBaseline
 from data_challenge.utils.logger import setup_logger
+from data_challenge.utils.losses import WeightedMSELoss
 from data_challenge.utils.metrics import compute_score
 
 
@@ -157,7 +158,7 @@ def train(config_path: str):
         lr_lambda=lambda e: warmup_lr_lambda(e, train_cfg["warmup_epochs"]),
     )
 
-    criterion = nn.MSELoss()
+    criterion = WeightedMSELoss()
 
     # Output dir: outputs/<run_name>_<timestamp>/
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

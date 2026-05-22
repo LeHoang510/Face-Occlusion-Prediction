@@ -20,12 +20,26 @@ def _setup_convnext(m):
     return in_features
 
 
+def _setup_vit(m):
+    in_features = m.heads.head.in_features
+    m.heads.head = nn.Identity()
+    return in_features
+
+
+def _setup_swin(m):
+    in_features = m.head.in_features
+    m.head = nn.Identity()
+    return in_features
+
+
 _BACKBONE_REGISTRY = {
     "resnet18":        (models.resnet18,        models.ResNet18_Weights.DEFAULT,        _setup_fc),
     "resnet50":        (models.resnet50,         models.ResNet50_Weights.DEFAULT,        _setup_fc),
     "efficientnet_b0": (models.efficientnet_b0,  models.EfficientNet_B0_Weights.DEFAULT, _setup_efficientnet),
     "efficientnet_b3": (models.efficientnet_b3,  models.EfficientNet_B3_Weights.DEFAULT, _setup_efficientnet),
     "convnext_tiny":   (models.convnext_tiny,    models.ConvNeXt_Tiny_Weights.DEFAULT,   _setup_convnext),
+    "vit_b_16":        (models.vit_b_16,         models.ViT_B_16_Weights.DEFAULT,        _setup_vit),
+    "swin_t":          (models.swin_t,            models.Swin_T_Weights.DEFAULT,          _setup_swin),
 }
 
 
