@@ -135,6 +135,7 @@ def train(config_path: str):
         backbone=model_cfg["backbone"],
         pretrained=model_cfg["pretrained"],
         dropout=model_cfg["dropout"],
+        img_size=data_cfg["img_size"],
     ).to(device)
     logger.info("Model: %s (pretrained=%s)", model_cfg["backbone"], model_cfg["pretrained"])
 

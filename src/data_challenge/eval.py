@@ -41,6 +41,7 @@ def evaluate(config_path: str, checkpoint: str | None = None, predict_test: bool
         backbone=model_cfg["backbone"],
         pretrained=False,
         dropout=0.0,
+        img_size=cfg["data"]["img_size"],
     ).to(device)
 
     ckpt_path = checkpoint or os.path.join(cfg["output"]["dir"], "best_model.pt")

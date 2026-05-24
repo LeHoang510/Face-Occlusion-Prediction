@@ -61,14 +61,14 @@ class CNNBaseline(nn.Module):
     Supports both torchvision and timm backbones.
     """
 
-    def __init__(self, backbone: str = "resnet50", pretrained: bool = True, dropout: float = 0.3):
+    def __init__(self, backbone: str = "resnet50", pretrained: bool = True, dropout: float = 0.3, img_size: int = 224):
         super().__init__()
         all_backbones = list(_TORCHVISION_REGISTRY) + list(_TIMM_REGISTRY)
         if backbone not in all_backbones:
             raise ValueError(f"Unknown backbone '{backbone}'. Choose from: {all_backbones}")
 
         if backbone in _TIMM_REGISTRY:
-            base = timm.create_model(backbone, pretrained=pretrained, num_classes=0)
+            base = timm.create_model(backbone, pretrained=pretrained, num_classes=0, img_size=img_size)
             in_features = base.num_features
         else:
             factory, weights_enum, setup_fn = _TORCHVISION_REGISTRY[backbone]
