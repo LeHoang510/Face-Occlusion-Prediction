@@ -222,6 +222,7 @@ def train(config_path: str):
 
         if score < best_score:
             best_score = score
+            best_epoch = epoch
             torch.save(ckpt, best_ckpt)
             logger.info("  -> New best score %.5f (lower is better), checkpoint saved.", best_score)
 
@@ -229,6 +230,7 @@ def train(config_path: str):
         "run_name": cfg["run_name"],
         "backbone": cfg["model"]["backbone"],
         "best_val_score": best_score,
+        "best_epoch": best_epoch,
         "epochs": train_cfg["epochs"],
         "wandb_run_id": wandb_run.id if wandb_run else None,
         "wandb_url": wandb_run.url if wandb_run else None,
