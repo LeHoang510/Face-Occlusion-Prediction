@@ -59,7 +59,7 @@ class CNNBaseline(nn.Module):
     """Pretrained backbone with a regression head for face occlusion prediction.
 
     Supports both torchvision and timm backbones.
-    """
+    """ 
 
     def __init__(self, backbone: str = "resnet50", pretrained: bool = True, dropout: float = 0.3, img_size: int = 224):
         super().__init__()
