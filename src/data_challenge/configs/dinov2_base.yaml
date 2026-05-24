@@ -1,5 +1,5 @@
 project_name: data-challenge-occlusion
-run_name: convnext_tiny_v2
+run_name: dinov2_base
 
 data:
   train_csv: dataset/DataChallenge2026/occlusion_datasets/train.csv
@@ -10,17 +10,17 @@ data:
   num_workers: 4
 
 model:
-  backbone: convnext_tiny
+  backbone: vit_base_patch14_dinov2.lvd142m
   pretrained: true
-  dropout: 0.3
+  dropout: 0.2
 
 training:
   epochs: 20
-  batch_size: 32
-  learning_rate: 1.0e-4
+  batch_size: 16  # use 8 if OOM
+  learning_rate: 2.0e-5  # base is larger, needs smaller lr
   weight_decay: 1.0e-4
   scheduler: cosine
-  warmup_epochs: 3
+  warmup_epochs: 4
   seed: 42
   gradient_clip: 1.0
 
