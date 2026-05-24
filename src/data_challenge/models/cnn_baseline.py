@@ -68,7 +68,7 @@ class CNNBaseline(nn.Module):
             raise ValueError(f"Unknown backbone '{backbone}'. Choose from: {all_backbones}")
 
         if backbone in _TIMM_REGISTRY:
-            base = timm.create_model(backbone, pretrained=pretrained, num_classes=0, img_size=img_size)
+            base = timm.create_model(backbone, pretrained=pretrained, num_classes=0, dynamic_img_size=True)
             in_features = base.num_features
         else:
             factory, weights_enum, setup_fn = _TORCHVISION_REGISTRY[backbone]
