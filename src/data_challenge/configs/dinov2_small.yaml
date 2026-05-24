@@ -16,7 +16,7 @@ model:
 
 training:
   epochs: 20
-  batch_size: 16  # reduce if OOM on small GPU
+  batch_size: 32
   learning_rate: 5.0e-5
   weight_decay: 1.0e-4
   scheduler: cosine
