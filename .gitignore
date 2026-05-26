@@ -19,3 +19,6 @@ logs/*.log.*
 # Outputs — only keep the empty folder, ignore all run artifacts
 outputs/*
 !outputs/.gitkeep
+
+logs/
+.env
