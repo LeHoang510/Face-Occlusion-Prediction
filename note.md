@@ -6,12 +6,12 @@
 |---|---|---|---|---|---|---|
 | 1 | swin_t | swin_t | **0.001090** | 15 | 20 | Best overall |
 | 2 | convnext_tiny | convnext_tiny | 0.001112 | 4 | 20 | Suspicious early peak, lr too low |
-| 3 | vit_b_16 | vit_b_16 | 0.001162 | 9 | 20 | |
+| 3 | vit_b_16 | vit_b_16 | 0.001162 | 9 | 20 | Longest training time |
 | 4 | convnext_tiny_v2 | convnext_tiny | 0.001169 | 8 | 20 | Rerun with lr=1e-4, worse than v1 |
 | 5 | efficientnet_b3 | efficientnet_b3 | 0.001185 | 18 | 20 | Still improving at epoch 20 |
 | 6 | twins_svt_small | twins_svt_small | 0.001207 | 14 | 20 | |
 | 7 | resnet50 | resnet50 | 0.001221 | 12 | 20 | Baseline |
-| 8 | dinov2_small | vit_small_patch14_dinov2.lvd142m | 0.001469 | 19 | 20 | Bad + fluctuating |
+| 8 | dinov2_small | vit_small_patch14_dinov2 | 0.001469 | 19 | 20 | Bad + fluctuating |
 
 
 The next step is to select the top three models for further improvement. The strategy should be:

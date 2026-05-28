@@ -1,5 +1,5 @@
 project_name: data-challenge-occlusion
-run_name: next_experiment
+run_name: cnn_baseline
 
 data:
   train_csv: dataset/DataChallenge2026/occlusion_datasets/train.csv
@@ -19,7 +19,7 @@ training:
   batch_size: 32
   learning_rate: 1.0e-4
   weight_decay: 1.0e-4
-  scheduler: cosine
+  scheduler: cosine  # cosine | step
   warmup_epochs: 2
   seed: 42
   gradient_clip: 1.0
@@ -27,7 +27,7 @@ training:
 wandb:
   enabled: true
   project: data-challenge-occlusion
-  entity: null
+  entity: null  # set your wandb username/org
 
 output:
   dir: outputs
