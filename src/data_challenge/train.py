@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
 from data_challenge.data.dataset import OcclusionDataset, get_transforms
+from data_challenge.data.samplers import BalancedGenderBatchSampler
 from data_challenge.models.cnn_baseline import CNNBaseline
 from data_challenge.utils.logger import setup_logger
 from data_challenge.utils.losses import WeightedMSELoss
@@ -67,6 +68,36 @@ def evaluate(model, loader, device) -> tuple[float, float, float]:
     )
 
 
+def create_train_loader(train_ds, full_dataset, cfg):
+    data_cfg = cfg["data"]
+    train_cfg = cfg["training"]
+    batching_cfg = train_cfg.get("batching", {})
+    strategy = batching_cfg.get("strategy", "random")
+
+    if strategy == "balanced_gender":
+        subset_genders = full_dataset.df.iloc[train_ds.indices]["gender"].tolist()
+        batch_sampler = BalancedGenderBatchSampler(
+            genders=subset_genders,
+            batch_size=train_cfg["batch_size"],
+            generator=torch.Generator().manual_seed(train_cfg["seed"]),
+            drop_last=batching_cfg.get("drop_last", False),
+        )
+        return DataLoader(
+            train_ds,
+            batch_sampler=batch_sampler,
+            num_workers=data_cfg["num_workers"],
+            pin_memory=True,
+        )
+
+    return DataLoader(
+        train_ds,
+        batch_size=train_cfg["batch_size"],
+        shuffle=True,
+        num_workers=data_cfg["num_workers"],
+        pin_memory=True,
+    )
+
+
 def train(config_path: str):
     cfg = load_config(config_path)
     set_seed(cfg["training"]["seed"])
@@ -113,13 +144,7 @@ def train(config_path: str):
         transform=get_transforms(train=False, img_size=data_cfg["img_size"]),
     )
 
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=cfg["training"]["batch_size"],
-        shuffle=True,
-        num_workers=data_cfg["num_workers"],
-        pin_memory=True,
-    )
+    train_loader = create_train_loader(train_ds, full_dataset, cfg)
     val_loader = DataLoader(
         val_ds,
         batch_size=cfg["training"]["batch_size"] * 2,
@@ -128,6 +153,7 @@ def train(config_path: str):
         pin_memory=True,
     )
     logger.info("Train: %d samples | Val: %d samples", train_size, val_size)
+    logger.info("Train batching strategy: %s", cfg["training"].get("batching", {}).get("strategy", "random"))
 
     # Model
     model_cfg = cfg["model"]
