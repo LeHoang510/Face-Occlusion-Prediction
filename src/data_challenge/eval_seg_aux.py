@@ -118,7 +118,7 @@ def _predict_test(model, cfg, data_cfg, seg_cfg, transform, device, logger):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate segmentation auxiliary face occlusion model")
-    parser.add_argument("--config", default="src/data_challenge/configs/archive/phase3_segmentation_aux/convnext_tiny.yaml")
+    parser.add_argument("--config", default="src/data_challenge/configs/phase3_segmentation_aux/convnext_tiny.yaml")
     parser.add_argument("--checkpoint", default=None, help="Path to .pt checkpoint")
     parser.add_argument("--predict-test", action="store_true", help="Generate test set predictions instead of val eval")
     args = parser.parse_args()

@@ -1,5 +1,5 @@
 project_name: data-challenge-occlusion
-run_name: phase3_seg_aux_swin_t
+run_name: phase3_seg_aux_resnet50
 
 data:
   train_csv: dataset/DataChallenge2026/occlusion_datasets/train.csv
@@ -10,10 +10,10 @@ data:
   num_workers: 4
 
 segmentation:
-  mask_root: dataset/masks/sam_vit_b
+  mask_root: dataset/masks/deeplabv3_person
 
 model:
-  backbone: swin_t
+  backbone: resnet50
   pretrained: true
   dropout: 0.3
   mask_feature_dim: 64
@@ -23,10 +23,10 @@ model:
 training:
   epochs: 20
   batch_size: 32
-  learning_rate: 5.0e-5
+  learning_rate: 1.0e-4
   weight_decay: 1.0e-4
   scheduler: cosine
-  warmup_epochs: 3
+  warmup_epochs: 2
   seed: 42
   gradient_clip: 1.0
   batching:

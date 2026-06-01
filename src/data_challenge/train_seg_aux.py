@@ -228,6 +228,6 @@ def train(config_path: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train face occlusion model with segmentation masks")
-    parser.add_argument("--config", default="src/data_challenge/configs/archive/phase3_segmentation_aux/convnext_tiny.yaml")
+    parser.add_argument("--config", default="src/data_challenge/configs/phase3_segmentation_aux/convnext_tiny.yaml")
     args = parser.parse_args()
     train(args.config)

@@ -1,5 +1,5 @@
 project_name: data-challenge-occlusion
-run_name: phase3_seg_aux_vit_b_16
+run_name: phase3_seg_aux_convnext_tiny
 
 data:
   train_csv: dataset/DataChallenge2026/occlusion_datasets/train.csv
@@ -10,10 +10,10 @@ data:
   num_workers: 4
 
 segmentation:
-  mask_root: dataset/masks/sam_vit_b
+  mask_root: dataset/masks/deeplabv3_person
 
 model:
-  backbone: vit_b_16
+  backbone: convnext_tiny
   pretrained: true
   dropout: 0.3
   mask_feature_dim: 64
@@ -23,7 +23,7 @@ model:
 training:
   epochs: 20
   batch_size: 32
-  learning_rate: 1.0e-5
+  learning_rate: 1.0e-4
   weight_decay: 1.0e-4
   scheduler: cosine
   warmup_epochs: 3
