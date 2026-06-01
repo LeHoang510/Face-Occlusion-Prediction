@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from torchvision import models
 import timm
@@ -61,22 +62,23 @@ class CNNBaseline(nn.Module):
     Supports both torchvision and timm backbones.
     """ 
 
-    def __init__(self, backbone: str = "resnet50", pretrained: bool = True, dropout: float = 0.3, img_size: int = 224):
+    def __init__(
+        self,
+        backbone: str = "resnet50",
+        pretrained: bool = True,
+        dropout: float = 0.3,
+        img_size: int = 224,
+        freeze_backbone: bool = False,
+    ):
         super().__init__()
-        all_backbones = list(_TORCHVISION_REGISTRY) + list(_TIMM_REGISTRY)
-        if backbone not in all_backbones:
-            raise ValueError(f"Unknown backbone '{backbone}'. Choose from: {all_backbones}")
-
-        if backbone in _TIMM_REGISTRY:
-            base = timm.create_model(backbone, pretrained=pretrained, num_classes=0, dynamic_img_size=True)
-            in_features = base.num_features
-        else:
-            factory, weights_enum, setup_fn = _TORCHVISION_REGISTRY[backbone]
-            weights = weights_enum if pretrained else None
-            base = factory(weights=weights)
-            in_features = setup_fn(base)
-
+        base, in_features = build_feature_backbone(backbone, pretrained=pretrained)
         self.backbone = base
+        self.freeze_backbone = freeze_backbone
+        if self.freeze_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+            self.backbone.eval()
+
         self.head = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(in_features, 256),
@@ -87,5 +89,31 @@ class CNNBaseline(nn.Module):
         )
 
     def forward(self, x):
-        features = self.backbone(x)
+        if self.freeze_backbone:
+            with torch.no_grad():
+                features = self.backbone(x)
+        else:
+            features = self.backbone(x)
         return self.head(features).squeeze(1)
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if self.freeze_backbone:
+            self.backbone.eval()
+        return self
+
+
+def build_feature_backbone(backbone: str, pretrained: bool = True):
+    all_backbones = list(_TORCHVISION_REGISTRY) + list(_TIMM_REGISTRY)
+    if backbone not in all_backbones:
+        raise ValueError(f"Unknown backbone '{backbone}'. Choose from: {all_backbones}")
+
+    if backbone in _TIMM_REGISTRY:
+        base = timm.create_model(backbone, pretrained=pretrained, num_classes=0, dynamic_img_size=True)
+        return base, base.num_features
+
+    factory, weights_enum, setup_fn = _TORCHVISION_REGISTRY[backbone]
+    weights = weights_enum if pretrained else None
+    base = factory(weights=weights)
+    in_features = setup_fn(base)
+    return base, in_features
