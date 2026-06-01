@@ -35,20 +35,22 @@ class OcclusionDataset(Dataset):
         return image, label, gender
 
 
-def get_transforms(train: bool = True, img_size: int = 224):
+def get_transforms(train: bool = True, img_size: int = 224, use_color_jitter: bool = True):
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
 
     if train:
-        return transforms.Compose(
-            [
-                transforms.Resize((img_size, img_size)),
-                transforms.RandomHorizontalFlip(),
-                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1),
-                transforms.ToTensor(),
-                transforms.Normalize(mean, std),
-            ]
-        )
+        transform_steps = [
+            transforms.Resize((img_size, img_size)),
+            transforms.RandomHorizontalFlip(),
+        ]
+        if use_color_jitter:
+            transform_steps.append(transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1))
+        transform_steps.extend([
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ])
+        return transforms.Compose(transform_steps)
     return transforms.Compose(
         [
             transforms.Resize((img_size, img_size)),

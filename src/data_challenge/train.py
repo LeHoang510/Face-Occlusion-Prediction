@@ -133,7 +133,11 @@ def train(config_path: str):
     full_dataset = OcclusionDataset(
         csv_path=data_cfg["train_csv"],
         img_root=data_cfg["img_root"],
-        transform=get_transforms(train=True, img_size=data_cfg["img_size"]),
+        transform=get_transforms(
+            train=True,
+            img_size=data_cfg["img_size"],
+            use_color_jitter=data_cfg.get("use_color_jitter", True),
+        ),
     )
 
     val_size = int(len(full_dataset) * data_cfg["val_split"])
