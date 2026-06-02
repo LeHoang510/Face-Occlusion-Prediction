@@ -8,6 +8,7 @@ import pandas as pd
 import torch
 import yaml
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from data_challenge.data.dataset import OcclusionDataset, get_transforms
 from data_challenge.models.factory import build_model
@@ -82,7 +83,7 @@ def evaluate(config_path: str, checkpoint: str | None = None, predict_test: bool
 
     all_preds, all_labels, all_genders = [], [], []
     with torch.no_grad():
-        for images, labels, genders in loader:
+        for images, labels, genders in tqdm(loader, desc="Evaluating", unit="batch"):
             preds = model(images.to(device)).cpu().numpy()
             all_preds.extend(preds)
             all_labels.extend(labels.numpy())
@@ -112,7 +113,7 @@ def _predict_test(model, cfg, data_cfg, transform, device, logger):
 
     all_filenames, all_preds = [], []
     with torch.no_grad():
-        for images, filenames in loader:
+        for images, filenames in tqdm(loader, desc="Predicting test", unit="batch"):
             preds = model(images.to(device)).cpu().numpy()
             all_preds.extend(preds)
             all_filenames.extend(filenames)

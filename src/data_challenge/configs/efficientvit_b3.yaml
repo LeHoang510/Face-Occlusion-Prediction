@@ -1,0 +1,34 @@
+project_name: data-challenge-occlusion
+run_name: efficientvit_b3
+
+data:
+  train_csv: dataset/DataChallenge2026/occlusion_datasets/train.csv
+  test_csv: dataset/DataChallenge2026/occlusion_datasets/test_students.csv
+  img_root: dataset/crops/Crop_224_5fp_100K
+  val_split: 0.1
+  img_size: 224
+  num_workers: 4
+
+model:
+  type: vit
+  backbone: efficientvit_b3
+  pretrained: true
+  dropout: 0.35
+
+training:
+  epochs: 20
+  batch_size: 16  # ViT uses more GPU memory than CNN backbones
+  learning_rate: 5.0e-5
+  weight_decay: 1.0e-4
+  scheduler: cosine
+  warmup_epochs: 2
+  seed: 42
+  gradient_clip: 1.0
+
+wandb:
+  enabled: true
+  project: data-challenge-occlusion
+  entity: micmia-telecom-paris
+
+output:
+  dir: outputs
