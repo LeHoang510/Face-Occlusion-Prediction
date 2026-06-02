@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
 from data_challenge.data.dataset import OcclusionDataset, get_transforms
-from data_challenge.models.cnn_baseline import CNNBaseline
+from data_challenge.models.factory import build_model
 from data_challenge.utils.logger import setup_logger
 from data_challenge.utils.metrics import compute_score
 
@@ -130,12 +130,13 @@ def train(config_path: str):
 
     # Model
     model_cfg = cfg["model"]
-    model = CNNBaseline(
-        backbone=model_cfg["backbone"],
-        pretrained=model_cfg["pretrained"],
-        dropout=model_cfg["dropout"],
-    ).to(device)
-    logger.info("Model: %s (pretrained=%s)", model_cfg["backbone"], model_cfg["pretrained"])
+    model = build_model(model_cfg).to(device)
+    logger.info(
+        "Model: %s/%s (pretrained=%s)",
+        model_cfg.get("type", "cnn"),
+        model_cfg["backbone"],
+        model_cfg["pretrained"],
+    )
 
     # Optimizer & scheduler
     train_cfg = cfg["training"]

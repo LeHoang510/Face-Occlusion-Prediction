@@ -10,7 +10,7 @@ import yaml
 from torch.utils.data import DataLoader
 
 from data_challenge.data.dataset import OcclusionDataset, get_transforms
-from data_challenge.models.cnn_baseline import CNNBaseline
+from data_challenge.models.factory import build_model
 from data_challenge.utils.logger import setup_logger
 from data_challenge.utils.metrics import compute_score
 
@@ -37,11 +37,8 @@ def evaluate(config_path: str, checkpoint: str | None = None, predict_test: bool
 
     # Model
     model_cfg = cfg["model"]
-    model = CNNBaseline(
-        backbone=model_cfg["backbone"],
-        pretrained=False,
-        dropout=0.0,
-    ).to(device)
+    eval_cfg = {**model_cfg, "pretrained": False, "dropout": 0.0}
+    model = build_model(eval_cfg).to(device)
 
     ckpt_path = checkpoint or os.path.join(cfg["output"]["dir"], "best_model.pt")
     logger.info("Loading checkpoint: %s", ckpt_path)

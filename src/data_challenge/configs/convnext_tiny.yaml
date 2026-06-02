@@ -10,6 +10,7 @@ data:
   num_workers: 4
 
 model:
+  type: cnn
   backbone: convnext_tiny
   pretrained: true
   dropout: 0.3
