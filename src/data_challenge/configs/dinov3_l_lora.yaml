@@ -21,7 +21,7 @@ model:
     r: 16
     alpha: 32
     dropout: 0.05
-    target_modules: ["query", "value"]   # adjust if AutoModel uses q_proj/v_proj etc.
+    target_modules: ["q_proj", "v_proj"]
     bias: none
 
 training:

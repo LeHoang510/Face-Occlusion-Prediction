@@ -1,7 +1,7 @@
 """DINOv3 (or DINOv2) backbone with optional LoRA + MLP regression head.
 
 Default config corresponds to:
-    DINOv3-L (ViT-L/16) frozen, LoRA r=16 on Q/V projections,
+    DINOv3-L (ViT-L/16) frozen, LoRA r=16 on q_proj/v_proj,
     LayerNorm + MLP(512) + Sigmoid head producing FaceOcclusion in [0, 1].
 
 Requires `transformers` and (optionally) `peft`. Both are declared in pyproject.
@@ -34,7 +34,7 @@ def _apply_lora(backbone: nn.Module, lora_cfg: dict[str, Any]) -> nn.Module:
         r=lora_cfg.get("r", 16),
         lora_alpha=lora_cfg.get("alpha", 32),
         lora_dropout=lora_cfg.get("dropout", 0.05),
-        target_modules=lora_cfg.get("target_modules", ["query", "value"]),
+        target_modules=lora_cfg.get("target_modules", ["q_proj", "v_proj"]),
         bias=lora_cfg.get("bias", "none"),
     )
     return get_peft_model(backbone, cfg)
