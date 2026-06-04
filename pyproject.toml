@@ -31,3 +31,13 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-name = "data_challenge"
+
+# PyPI ships CPU-only torch on Windows; use the CUDA wheel index instead.
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
