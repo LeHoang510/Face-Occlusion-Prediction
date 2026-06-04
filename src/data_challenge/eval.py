@@ -10,7 +10,7 @@ import yaml
 from torch.utils.data import DataLoader
 
 from data_challenge.data.dataset import OcclusionDataset, get_transforms
-from data_challenge.models.cnn_baseline import CNNBaseline
+from data_challenge.models import build_model
 from data_challenge.utils.logger import setup_logger
 from data_challenge.utils.metrics import compute_score
 
@@ -35,14 +35,13 @@ def evaluate(config_path: str, checkpoint: str | None = None, predict_test: bool
     device = get_device()
     logger.info("Using device: %s", device)
 
-    # Model
-    model_cfg = cfg["model"]
-    model = CNNBaseline(
-        backbone=model_cfg["backbone"],
-        pretrained=False,
-        dropout=0.0,
-        img_size=cfg["data"]["img_size"],
-    ).to(device)
+    # Model (factory). For cnn_baseline we skip the pretrained download since the
+    # checkpoint will overwrite everything anyway; for dinov3 we keep pretrained=True
+    # because the HF config + weights are needed to construct the architecture.
+    if cfg["model"].get("name", "cnn_baseline") == "cnn_baseline":
+        cfg["model"]["pretrained"] = False
+        cfg["model"]["dropout"] = 0.0
+    model = build_model(cfg).to(device)
 
     ckpt_path = checkpoint or os.path.join(cfg["output"]["dir"], "best_model.pt")
     logger.info("Loading checkpoint: %s", ckpt_path)
