@@ -129,19 +129,35 @@ EOF
   local vsub="${1:-}"; shift || true
   case "$vsub" in
     offers)
+      # cuda_max_good is the max CUDA version the host driver supports.
+      # We require >=12.6 so the default PyPI torch wheel (cu126/cu128) works
+      # out of the box and we don't end up in CPU fallback like on driver 12.4.
       local gpu="${1:-RTX_4090}"
       vastai search offers \
-        "gpu_name=${gpu} num_gpus=1 dph<0.6 reliability>0.97 inet_down>200" \
+        "gpu_name=${gpu} num_gpus=1 dph<0.6 reliability>0.97 inet_down>200 cuda_max_good>=12.6" \
         --order "dph"
       ;;
     list)
       vastai show instances
       ;;
     launch)
-      local ask="${1:?vast launch: need an ask/offer id}"
+      # Usage: vast launch <ask-id> [--image <img>] [--disk <GB>]
+      # VAST_IMAGE env var overrides --image. Defaults to a cuda12.8 image
+      # (driver host on the offers we now filter for supports CUDA >= 12.6).
+      local ask="${1:?vast launch: need an ask/offer id}"; shift || true
+      local image="${VAST_IMAGE:-pytorch/pytorch:2.6.0-cuda12.8-cudnn9-devel}"
+      local disk="80"
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --image) image="$2"; shift 2 ;;
+          --disk)  disk="$2";  shift 2 ;;
+          *) echo "vast launch: unknown arg '$1'" >&2; exit 1 ;;
+        esac
+      done
+      echo "[vast] launch ask=$ask image=$image disk=${disk}G"
       vastai create instance "$ask" \
-        --image pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel \
-        --disk 80 \
+        --image "$image" \
+        --disk "$disk" \
         --onstart-cmd "touch /workspace/.vast-ready"
       ;;
     ssh-url)

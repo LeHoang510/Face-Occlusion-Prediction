@@ -40,20 +40,46 @@ echo "[vast-run] config=$CONFIG | log=$LOG"
 echo "[vast-run] host=$(hostname)"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null || true
 
-# Pick runner (mirror scripts/slurm/_common.sh)
+# Pick runner. vast_setup.sh creates a venv with --system-site-packages so
+# torch comes from /opt/conda. Activating .venv prepends its site-packages
+# but still inherits the system ones — that's the whole trick.
 export PATH="$HOME/.local/bin:$PATH"
 if [[ -d .venv ]]; then
   # shellcheck disable=SC1091
   source .venv/bin/activate
   PY="python"
-elif command -v uv >/dev/null 2>&1; then
-  PY="uv run python"
 else
-  echo "[vast-run] ERROR: run 'bash scripts/vast_setup.sh' first (no .venv, no uv)" >&2
+  echo "[vast-run] ERROR: .venv missing — run 'bash scripts/vast_setup.sh' first" >&2
   exit 1
 fi
 
 set -o pipefail
+
+# Force the venv's bundled NVIDIA libs (NCCL, cuDNN, cuBLAS…) to take priority
+# over the container's /usr/lib/libnccl (which may be too old). Recursive find
+# handles both classic (nvidia/nccl/lib/) and cu-namespaced (nvidia/cu13/lib/)
+# wheel layouts.
+NVIDIA_LIB_DIRS=$(find .venv -type d -name 'lib' -path '*/nvidia/*' 2>/dev/null | sort -u)
+for d in $NVIDIA_LIB_DIRS; do
+  LD_LIBRARY_PATH="$d${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+done
+export LD_LIBRARY_PATH
+
+# Pre-flight CUDA check. Full-FT of ViT-L on CPU = ~55h/epoch and would burn
+# vast.ai $$ for nothing. Refuse to start if torch can't see the GPU.
+CUDA_OK=$($PY -c "import torch; print(int(torch.cuda.is_available()))" 2>/dev/null || echo 0)
+if [[ "$CUDA_OK" != "1" ]]; then
+  $PY - <<'PY' || true
+import torch
+print(f"[vast-run] torch={torch.__version__}  built_for_cuda={torch.version.cuda}  device_count={torch.cuda.device_count()}", flush=True)
+PY
+  echo "[vast-run] ERROR: torch.cuda.is_available() = False. Refusing to run on CPU." >&2
+  echo "[vast-run] Re-run 'bash scripts/vast_setup.sh' (it now auto-pins the right torch wheel)" >&2
+  echo "[vast-run] or destroy this instance and pick one with newer drivers (CUDA >= 12.6)." >&2
+  exit 3
+fi
+echo "[vast-run] CUDA OK ($($PY -c 'import torch; print(torch.cuda.get_device_name(0))'))" | tee -a "$LOG"
+
 START_TS=$(date +%s)
 
 if $PY src/data_challenge/train.py --config "$CONFIG" 2>&1 | tee -a "$LOG"; then
