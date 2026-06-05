@@ -40,11 +40,17 @@ echo "[vast-run] config=$CONFIG | log=$LOG"
 echo "[vast-run] host=$(hostname)"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null || true
 
-# Pick runner
-if command -v uv >/dev/null 2>&1; then
+# Pick runner (mirror scripts/slurm/_common.sh)
+export PATH="$HOME/.local/bin:$PATH"
+if [[ -d .venv ]]; then
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+  PY="python"
+elif command -v uv >/dev/null 2>&1; then
   PY="uv run python"
 else
-  PY="python"
+  echo "[vast-run] ERROR: run 'bash scripts/vast_setup.sh' first (no .venv, no uv)" >&2
+  exit 1
 fi
 
 set -o pipefail
