@@ -1,0 +1,49 @@
+project_name: data-challenge-occlusion
+run_name: dinov3_l_full_ft
+
+data:
+  train_csv: dataset/DataChallenge2026/occlusion_datasets/train.csv
+  test_csv: dataset/DataChallenge2026/occlusion_datasets/test_students.csv
+  img_root: dataset/crops/Crop_224_5fp_100K
+  val_split: 0.1
+  img_size: 224
+  num_workers: 8
+
+model:
+  name: dinov3
+  model_id: facebook/dinov3-vitl16-pretrain-lvd1689m   # gated — requires HF_TOKEN
+  freeze_backbone: false              # FULL fine-tuning
+  trust_remote_code: true
+  head_dropout: 0.1
+  hidden_dim: 512
+  n_layers: 24                        # ViT-L = 24 blocks ; used for LLRD scaling
+  gradient_checkpointing: true        # required to fit ViT-L on a 24G GPU at bs=32
+  lora:
+    enabled: false                    # full FT, no adapters
+
+training:
+  epochs: 6                           # full FT converges much faster than LoRA
+  batch_size: 32                      # micro-batch ; effective = batch_size * grad_accum
+  gradient_accumulation_steps: 4      # effective batch = 128
+  # Single LR (used when learning_rate_{head,backbone} are missing):
+  learning_rate: 1.0e-5
+  # Per-group LRs (head ≠ backbone) — activate the split + LLRD path:
+  learning_rate_head: 5.0e-4          # fresh head, higher LR
+  learning_rate_backbone: 1.0e-5      # pretrained features, low LR to avoid forgetting
+  llrd_decay: 0.75                    # layer-wise LR decay (1.0 = disabled)
+  weight_decay: 0.05                  # excludes bias and LayerNorm automatically
+  scheduler: cosine
+  warmup_epochs: 1
+  seed: 42
+  gradient_clip: 1.0
+  amp_dtype: bf16                     # fp32 | fp16 | bf16  (bf16 = no GradScaler, recommended on 4090/A100)
+  batching:
+    strategy: balanced_gender         # leverage the existing balanced sampler
+
+wandb:
+  enabled: true
+  project: data-challenge-occlusion
+  entity: null
+
+output:
+  dir: outputs

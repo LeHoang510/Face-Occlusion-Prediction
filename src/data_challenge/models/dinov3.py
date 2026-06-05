@@ -11,6 +11,7 @@ The model id can be pointed to any HuggingFace ViT-style model exposing
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import torch
@@ -93,3 +94,114 @@ class DinoV3Regressor(nn.Module):
         out = self.backbone(pixel_values=pixel_values)
         cls = out.last_hidden_state[:, 0]
         return self.head(cls).squeeze(1)
+
+    # ---- utilities used by the trainer for full fine-tuning ----
+
+    def enable_gradient_checkpointing(self) -> None:
+        """Turn on HF gradient checkpointing on the underlying backbone.
+
+        Walks through any PEFT wrapper to reach the actual HF model.
+        No-op if the backbone does not expose the API.
+        """
+        target = self.backbone
+        # Drill: PEFT wraps as PeftModel.base_model.model -> the original HF backbone
+        for attr in ("base_model", "model"):
+            if hasattr(target, attr):
+                inner = getattr(target, attr)
+                # Only descend if inner has the API or further wrappers
+                if hasattr(inner, "gradient_checkpointing_enable") or hasattr(inner, "base_model"):
+                    target = inner
+        if hasattr(target, "gradient_checkpointing_enable"):
+            try:
+                target.gradient_checkpointing_enable(
+                    gradient_checkpointing_kwargs={"use_reentrant": False}
+                )
+            except TypeError:
+                # Older transformers signatures
+                target.gradient_checkpointing_enable()
+
+
+# ---------------------------------------------------------------------------
+# Parameter-group builder for full fine-tuning
+# ---------------------------------------------------------------------------
+
+# Match the block index in a parameter name across the various HF / timm
+# transformer naming conventions.
+_LAYER_PATTERNS = [
+    re.compile(r"encoder\.layer\.(\d+)"),
+    re.compile(r"encoder\.layers\.(\d+)"),
+    re.compile(r"\bblocks\.(\d+)"),
+    re.compile(r"(?:^|\.)layer\.(\d+)"),
+]
+
+
+def _layer_index(name: str, n_layers: int) -> int:
+    """Return the transformer block index inferred from a parameter name.
+
+    Convention:
+        -1               : pre-transformer (patch / positional embeddings, cls token)
+        0..n_layers-1    : transformer block index
+        n_layers         : post-transformer (final norm, anything else)
+    """
+    for pat in _LAYER_PATTERNS:
+        m = pat.search(name)
+        if m:
+            return int(m.group(1))
+    if any(s in name for s in ("embed", "patch_embed", "pos_embed", "cls_token")):
+        return -1
+    return n_layers
+
+
+def build_param_groups(
+    model: "DinoV3Regressor",
+    *,
+    lr_backbone: float,
+    lr_head: float,
+    weight_decay: float,
+    llrd_decay: float = 1.0,
+    n_layers: int = 24,
+    no_decay_keywords: tuple[str, ...] = ("bias", "LayerNorm", "layernorm", "ln_", "norm.weight"),
+) -> list[dict[str, Any]]:
+    """AdamW param groups for full fine-tuning of a ViT-style backbone.
+
+    Splits parameters into:
+      - head (lr=lr_head)
+      - backbone per-layer (lr = lr_backbone * llrd_decay**(n_layers - layer_idx))
+
+    Bias and LayerNorm parameters get weight_decay=0 (standard ViT recipe).
+    Set llrd_decay=1.0 to disable layer-wise LR decay.
+    """
+    head_buckets: dict[bool, list[nn.Parameter]] = {True: [], False: []}
+    for n, p in model.head.named_parameters():
+        if not p.requires_grad:
+            continue
+        no_wd = any(k in n for k in no_decay_keywords)
+        head_buckets[no_wd].append(p)
+
+    bb_buckets: dict[tuple[int, bool], list[nn.Parameter]] = {}
+    for n, p in model.backbone.named_parameters():
+        if not p.requires_grad:
+            continue
+        idx = _layer_index(n, n_layers)
+        no_wd = any(k in n for k in no_decay_keywords)
+        bb_buckets.setdefault((idx, no_wd), []).append(p)
+
+    groups: list[dict[str, Any]] = []
+    for no_wd, params in head_buckets.items():
+        if params:
+            groups.append({
+                "params": params,
+                "lr": lr_head,
+                "weight_decay": 0.0 if no_wd else weight_decay,
+                "name": f"head{'_nowd' if no_wd else ''}",
+            })
+    for (idx, no_wd), params in sorted(bb_buckets.items()):
+        scale = llrd_decay ** (n_layers - max(idx, 0))
+        groups.append({
+            "params": params,
+            "lr": lr_backbone * scale,
+            "weight_decay": 0.0 if no_wd else weight_decay,
+            "name": f"backbone.L{idx}{'_nowd' if no_wd else ''}",
+        })
+    return groups
+

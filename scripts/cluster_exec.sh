@@ -108,15 +108,60 @@ cmd_cmd() {
 }
 
 cmd_vast() {
-  cat <<EOF >&2
-[vast] vast.ai delegation is not wired up yet.
-[vast] To plug it in, install \`vastai\` CLI and call e.g.:
-[vast]   vastai search offers 'gpu_name=RTX_4090 reliability>0.95 num_gpus=1'
-[vast]   vastai create instance <offer-id> --image pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel --disk 80
-[vast]   vastai ssh-url <instance-id>
-[vast] Forwarded args: $*
+  # Thin wrapper around the vastai CLI with sensible presets for this project.
+  #
+  # Subcommands (under `vast`):
+  #   offers [gpu]    search for cheap offers (default: RTX_4090, 1 GPU, dph<0.6)
+  #   list            show your running instances
+  #   launch <ask>    create instance from an ask id, PyTorch image, 80G disk
+  #   ssh-url <iid>   print SSH url for an instance
+  #   destroy <iid>   destroy an instance (with confirmation)
+  #   <other>         passthrough to `vastai <other> ...`
+  if ! command -v vastai >/dev/null 2>&1; then
+    cat <<EOF >&2
+[vast] vastai CLI not found. Install it once:
+[vast]   pipx install vastai      # or: uv tool install vastai
+[vast]   vastai set api-key <YOUR_KEY>
 EOF
-  exit 2
+    exit 2
+  fi
+
+  local vsub="${1:-}"; shift || true
+  case "$vsub" in
+    offers)
+      local gpu="${1:-RTX_4090}"
+      vastai search offers \
+        "gpu_name=${gpu} num_gpus=1 dph<0.6 reliability>0.97 inet_down>200" \
+        --order "dph"
+      ;;
+    list)
+      vastai show instances
+      ;;
+    launch)
+      local ask="${1:?vast launch: need an ask/offer id}"
+      vastai create instance "$ask" \
+        --image pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel \
+        --disk 80 \
+        --onstart-cmd "touch /workspace/.vast-ready"
+      ;;
+    ssh-url)
+      local iid="${1:?vast ssh-url: need an instance id}"
+      vastai ssh-url "$iid"
+      ;;
+    destroy)
+      local iid="${1:?vast destroy: need an instance id}"
+      read -rp "[vast] really destroy instance $iid? [y/N] " ans
+      [[ "$ans" =~ ^[yY]$ ]] || { echo "[vast] aborted."; exit 0; }
+      vastai destroy instance "$iid"
+      ;;
+    ""|-h|--help)
+      sed -n '/^cmd_vast()/,/^  esac$/p' "$0" | head -n 20
+      ;;
+    *)
+      # Passthrough so anything not listed still works.
+      vastai "$vsub" "$@"
+      ;;
+  esac
 }
 
 sub="${1:-}"; shift || true
