@@ -22,18 +22,22 @@ model:
     enabled: false                    # full FT, no adapters
 
 training:
-  epochs: 6                           # full FT converges much faster than LoRA
+  # v2: bumped to 12 epochs (was 6) — at 6 epochs the cosine schedule consumed
+  # all its LR budget while the val score was still decreasing.
+  epochs: 12
   batch_size: 32                      # micro-batch ; effective = batch_size * grad_accum
   gradient_accumulation_steps: 4      # effective batch = 128
   # Single LR (used when learning_rate_{head,backbone} are missing):
   learning_rate: 1.0e-5
   # Per-group LRs (head ≠ backbone) — activate the split + LLRD path:
   learning_rate_head: 5.0e-4          # fresh head, higher LR
-  learning_rate_backbone: 1.0e-5      # pretrained features, low LR to avoid forgetting
-  llrd_decay: 0.75                    # layer-wise LR decay (1.0 = disabled)
+  # v2: backbone LR doubled (was 1e-5). With LLRD=0.85 (was 0.75) the bottom
+  # layers actually learn (~2 % of base LR instead of 0.13 %).
+  learning_rate_backbone: 2.0e-5
+  llrd_decay: 0.85                    # layer-wise LR decay (1.0 = disabled)
   weight_decay: 0.05                  # excludes bias and LayerNorm automatically
   scheduler: cosine
-  warmup_epochs: 1
+  warmup_epochs: 2                    # v2: 2 (was 1) — useful now that we have 12 epochs
   seed: 42
   gradient_clip: 1.0
   amp_dtype: bf16                     # fp32 | fp16 | bf16  (bf16 = no GradScaler, recommended on 4090/A100)

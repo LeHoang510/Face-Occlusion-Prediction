@@ -135,7 +135,7 @@ def create_train_loader(train_ds, full_dataset, cfg):
     )
 
 
-def train(config_path: str):
+def train(config_path: str, resume: str | None = None):
     cfg = load_config(config_path)
     set_seed(cfg["training"]["seed"])
 
@@ -263,10 +263,55 @@ def train(config_path: str):
     logger.info("Run output dir: %s", run_dir)
 
     best_score = float("inf")
+    best_epoch = 0
     best_ckpt = os.path.join(run_dir, "best_model.pt")
     last_ckpt = os.path.join(run_dir, "last_model.pt")
 
-    epoch_bar = tqdm(range(1, train_cfg["epochs"] + 1), desc="Training", unit="epoch")
+    # -----------------------------------------------------------------------
+    # Resume: load weights (+ optimizer state if present), fast-forward
+    # schedulers so the cosine curve continues from the right point.
+    # -----------------------------------------------------------------------
+    start_epoch = 1
+    if resume is not None:
+        logger.info("Resuming from: %s", resume)
+        ckpt_in = torch.load(resume, map_location=device)
+        missing, unexpected = model.load_state_dict(ckpt_in["model_state"], strict=False)
+        if missing:
+            logger.warning("  %d missing keys", len(missing))
+        if unexpected:
+            logger.warning("  %d unexpected keys", len(unexpected))
+        if "optimizer_state" in ckpt_in:
+            try:
+                optimizer.load_state_dict(ckpt_in["optimizer_state"])
+                logger.info("  optimizer state restored")
+            except Exception as e:
+                logger.warning("  optimizer state restore failed: %s", e)
+        else:
+            logger.info("  optimizer state not in checkpoint — using fresh AdamW state (warm-start)")
+        last_epoch = int(ckpt_in.get("epoch", 0))
+        start_epoch = last_epoch + 1
+        best_score = float(ckpt_in.get("best_score", ckpt_in.get("score", float("inf"))))
+        best_epoch = int(ckpt_in.get("best_epoch", last_epoch))
+        # Fast-forward schedulers to start_epoch (replays the per-epoch step pattern)
+        for ep in range(1, start_epoch):
+            if ep <= train_cfg["warmup_epochs"]:
+                warmup_scheduler.step()
+            else:
+                base_scheduler.step()
+        logger.info(
+            "  resumed: start_epoch=%d  prev_best=%.5f@ep%d  current_lr=%.2e",
+            start_epoch, best_score, best_epoch, optimizer.param_groups[0]["lr"],
+        )
+
+    if start_epoch > train_cfg["epochs"]:
+        logger.warning(
+            "Nothing to do: checkpoint already at epoch %d, config.epochs=%d. "
+            "Bump training.epochs in the config to continue.",
+            start_epoch - 1, train_cfg["epochs"],
+        )
+        return
+
+    epoch_bar = tqdm(range(start_epoch, train_cfg["epochs"] + 1), desc="Training", unit="epoch")
     for epoch in epoch_bar:
         model.train()
         running_loss = 0.0
@@ -333,13 +378,25 @@ def train(config_path: str):
                 "lr": current_lr,
             })
 
-        ckpt = {"epoch": epoch, "model_state": model.state_dict(), "score": score}
-        torch.save(ckpt, last_ckpt)
+        # last_model.pt carries the full state (model + optimizer) so it is
+        # resumable. best_model.pt stays lightweight (model only) for inference.
+        last_payload = {
+            "epoch": epoch,
+            "model_state": model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
+            "score": score,
+            "best_score": best_score if score >= best_score else score,
+            "best_epoch": best_epoch if score >= best_score else epoch,
+        }
+        torch.save(last_payload, last_ckpt)
 
         if score < best_score:
             best_score = score
             best_epoch = epoch
-            torch.save(ckpt, best_ckpt)
+            torch.save(
+                {"epoch": epoch, "model_state": model.state_dict(), "score": score},
+                best_ckpt,
+            )
             logger.info("  -> New best score %.5f (lower is better), checkpoint saved.", best_score)
 
     summary = {
@@ -371,5 +428,10 @@ def train(config_path: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train face occlusion model")
     parser.add_argument("--config", default="src/data_challenge/configs/base_config.yaml")
+    parser.add_argument(
+        "--resume",
+        default=None,
+        help="Path to a checkpoint to resume from (best_model.pt or last_model.pt)",
+    )
     args = parser.parse_args()
-    train(args.config)
+    train(args.config, resume=args.resume)

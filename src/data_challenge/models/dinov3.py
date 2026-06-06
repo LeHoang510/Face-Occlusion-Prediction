@@ -17,6 +17,8 @@ from typing import Any
 import torch
 import torch.nn as nn
 
+from data_challenge.utils import torch_compat  # noqa: F401 — patch FP8 dtypes before HF import
+
 
 def _build_backbone(model_id: str, freeze: bool, trust_remote_code: bool) -> nn.Module:
     from transformers import AutoModel

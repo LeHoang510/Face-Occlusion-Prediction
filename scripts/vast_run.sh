@@ -82,7 +82,18 @@ echo "[vast-run] CUDA OK ($($PY -c 'import torch; print(torch.cuda.get_device_na
 
 START_TS=$(date +%s)
 
-if $PY src/data_challenge/train.py --config "$CONFIG" 2>&1 | tee -a "$LOG"; then
+# Optional resume: pass RESUME_CHECKPOINT=path/to/ckpt.pt to continue training.
+RESUME_ARG=()
+if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
+  if [[ ! -f "$RESUME_CHECKPOINT" ]]; then
+    echo "[vast-run] ERROR: RESUME_CHECKPOINT='$RESUME_CHECKPOINT' not found" >&2
+    exit 2
+  fi
+  RESUME_ARG=(--resume "$RESUME_CHECKPOINT")
+  echo "[vast-run] resuming from: $RESUME_CHECKPOINT" | tee -a "$LOG"
+fi
+
+if $PY src/data_challenge/train.py --config "$CONFIG" "${RESUME_ARG[@]}" 2>&1 | tee -a "$LOG"; then
   ELAPSED=$(( $(date +%s) - START_TS ))
   echo "[vast-run] training success in ${ELAPSED}s" | tee -a "$LOG"
 

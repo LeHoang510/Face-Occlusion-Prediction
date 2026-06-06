@@ -67,6 +67,13 @@ SYS_TORCH_CUDA=$("$SYS_PYTHON" -c "import torch; print(torch.version.cuda)")
 echo "[setup] container python: $SYS_PYTHON"
 echo "[setup] container torch:  $SYS_TORCH (built for CUDA $SYS_TORCH_CUDA)"
 
+# transformers>=4.50 imports torch.float8_e8m0fnu at module load (PyTorch >= 2.6).
+# Older pytorch/* images still work via our FP8 shim, but 2.6+ is preferred.
+if ! "$SYS_PYTHON" -c "import torch; assert hasattr(torch, 'float8_e8m0fnu')" 2>/dev/null; then
+  echo "[setup] WARN: torch $SYS_TORCH lacks float8_e8m0fnu (need 2.6+ for native FP8)."
+  echo "[setup]        Training will use an FP8 compat shim; prefer image pytorch/pytorch:2.6.0-cuda12.8-cudnn9-devel"
+fi
+
 # ---------------------------------------------------------------------------
 # Create venv that INHERITS the container's site-packages.
 # This means `import torch` in the venv resolves to the container's torch.
@@ -138,7 +145,12 @@ fi
 # Optional pre-warm of DINOv3-L weights to save time on the first epoch.
 if [[ "${PREWARM_HF:-0}" == "1" ]]; then
   echo "[setup] pre-downloading facebook/dinov3-vitl16-pretrain-lvd1689m"
-  python -c "from transformers import AutoModel; AutoModel.from_pretrained('facebook/dinov3-vitl16-pretrain-lvd1689m', trust_remote_code=True)"
+  python -c "from data_challenge.utils import torch_compat; from transformers import AutoModel; AutoModel.from_pretrained('facebook/dinov3-vitl16-pretrain-lvd1689m', trust_remote_code=True)"
 fi
+
+# Smoke-test: DINOv3 class import (catches transformers/torch ABI mismatches early).
+echo "[setup] smoke-test: DINOv3ViTModel import"
+python -c "from data_challenge.utils import torch_compat; from transformers.models.dinov3_vit.modeling_dinov3_vit import DINOv3ViTModel; print('DINOv3ViTModel OK')" \
+  || { echo "[setup] ERROR: DINOv3 import failed — check torch/transformers versions above" >&2; exit 3; }
 
 echo "[setup] done. Next: bash scripts/vast_run.sh src/data_challenge/configs/dinov3_l_full_ft.yaml"
