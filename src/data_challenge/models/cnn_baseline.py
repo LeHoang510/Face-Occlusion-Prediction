@@ -52,6 +52,7 @@ _TIMM_REGISTRY = {
     "twins_svt_small",
     "vit_small_patch14_dinov2.lvd142m",
     "vit_base_patch14_dinov2.lvd142m",
+    "efficientvit_b3.r288_in1k",
 }
 
 
