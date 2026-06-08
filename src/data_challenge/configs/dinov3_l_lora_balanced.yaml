@@ -1,5 +1,10 @@
 project_name: data-challenge-occlusion
-run_name: dinov3_l_lora
+run_name: dinov3_l_lora_balanced
+
+# Same architecture as the LoRA baseline ; the loss mirrors the eval metric:
+#   L = (L_F + L_M) / 2 + alpha * |L_F - L_M|
+# With alpha=1.0 this is exactly the metric formula. Lower alpha softens the
+# fairness penalty if early epochs become unstable.
 
 data:
   train_csv: dataset/DataChallenge2026/occlusion_datasets/train.csv
@@ -11,7 +16,7 @@ data:
 
 model:
   name: dinov3
-  model_id: facebook/dinov3-vitl16-pretrain-lvd1689m   # may require HF_TOKEN (gated)
+  model_id: facebook/dinov3-vitl16-pretrain-lvd1689m
   freeze_backbone: true
   trust_remote_code: true
   head_dropout: 0.1
@@ -26,13 +31,18 @@ model:
 
 training:
   epochs: 20
-  batch_size: 64           # ViT-L embeddings are heavy; tune to your GPU memory
-  learning_rate: 5.0e-4    # LoRA tolerates higher LR than full fine-tuning
+  batch_size: 64
+  learning_rate: 5.0e-4
   weight_decay: 1.0e-4
   scheduler: cosine
   warmup_epochs: 1
   seed: 42
   gradient_clip: 1.0
+  amp_dtype: bf16
+  loss: balanced_aligned
+  balanced_aligned_alpha: 0.3   # exact metric ; try 0.5 if training is unstable
+  batching:
+    strategy: balanced_gender
 
 wandb:
   enabled: true

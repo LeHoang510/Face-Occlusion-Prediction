@@ -1,5 +1,8 @@
 project_name: data-challenge-occlusion
-run_name: dinov3_l_lora
+run_name: dinov3_l_lora_groupdro
+
+# Same architecture as the LoRA baseline ; only training.loss changes.
+# Goal: attack the |ErrF - ErrM| term directly via Group DRO online re-weighting.
 
 data:
   train_csv: dataset/DataChallenge2026/occlusion_datasets/train.csv
@@ -11,7 +14,7 @@ data:
 
 model:
   name: dinov3
-  model_id: facebook/dinov3-vitl16-pretrain-lvd1689m   # may require HF_TOKEN (gated)
+  model_id: facebook/dinov3-vitl16-pretrain-lvd1689m
   freeze_backbone: true
   trust_remote_code: true
   head_dropout: 0.1
@@ -26,13 +29,18 @@ model:
 
 training:
   epochs: 20
-  batch_size: 64           # ViT-L embeddings are heavy; tune to your GPU memory
-  learning_rate: 5.0e-4    # LoRA tolerates higher LR than full fine-tuning
+  batch_size: 64
+  learning_rate: 5.0e-4
   weight_decay: 1.0e-4
   scheduler: cosine
   warmup_epochs: 1
   seed: 42
   gradient_clip: 1.0
+  amp_dtype: bf16
+  loss: group_dro
+  group_dro_eta: 0.01           # 0.01 = Sagawa default ; raise to chase fairness harder
+  batching:
+    strategy: balanced_gender   # important: Group DRO needs both groups per batch
 
 wandb:
   enabled: true

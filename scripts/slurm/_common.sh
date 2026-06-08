@@ -38,11 +38,42 @@ else
 fi
 export RUN_PREFIX
 
-# Cache placement (persists across jobs, kept out of rsync via excludes).
-export HF_HOME="${HF_HOME:-$PROJECT_ROOT/.hf_cache}"
+# ---------------------------------------------------------------------------
+# Cache placement — prefer scratch space to avoid home-quota issues.
+# On ENST the home is tight ; SLURM nodes usually expose /scratch/$USER or
+# at least $TMPDIR. We fall back gracefully if nothing is writable.
+# ---------------------------------------------------------------------------
+CACHE_ROOT=""
+for candidate in \
+    "${CACHE_ROOT_OVERRIDE:-}" \
+    "${SCRATCH:-}" \
+    "/scratch/$USER" \
+    "/scratch-local/$USER" \
+    "${TMPDIR:-}" \
+    "/tmp/$USER" \
+; do
+  [[ -z "$candidate" ]] && continue
+  if mkdir -p "$candidate" 2>/dev/null && [[ -w "$candidate" ]]; then
+    CACHE_ROOT="$candidate"
+    break
+  fi
+done
+# Last-resort fallback (will hit the home quota — warn loudly).
+if [[ -z "$CACHE_ROOT" ]]; then
+  CACHE_ROOT="$PROJECT_ROOT/.hf_cache"
+  echo "[common] WARNING: no scratch space found ; caching under home — risk of disk-quota crash" >&2
+fi
+echo "[common] CACHE_ROOT=$CACHE_ROOT"
+
+export HF_HOME="${HF_HOME:-$CACHE_ROOT/hf}"
 export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$HF_HOME/hub}"
-export TORCH_HOME="${TORCH_HOME:-$PROJECT_ROOT/.torch_cache}"
-mkdir -p "$HF_HOME" "$TORCH_HOME"
+export TORCH_HOME="${TORCH_HOME:-$CACHE_ROOT/torch}"
+export WANDB_DIR="${WANDB_DIR:-$CACHE_ROOT/wandb}"
+mkdir -p "$HF_HOME" "$TORCH_HOME" "$WANDB_DIR"
+
+# Disable wandb's console-capture: it buffers tqdm output to disk and crashed
+# us with EDQUOT mid-training. Cloud-side metrics are unaffected.
+export WANDB_CONSOLE="${WANDB_CONSOLE:-off}"
 
 # Sane defaults for shared nodes.
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
