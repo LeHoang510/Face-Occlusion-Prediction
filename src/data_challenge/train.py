@@ -18,7 +18,7 @@ from data_challenge.data.dataset import OcclusionDataset, get_transforms
 from data_challenge.data.samplers import BalancedGenderBatchSampler
 from data_challenge.models import build_model
 from data_challenge.utils.logger import setup_logger
-from data_challenge.utils.losses import WeightedMSELoss
+from data_challenge.utils.losses import build_criterion
 from data_challenge.utils.metrics import compute_score
 
 
@@ -253,7 +253,9 @@ def train(config_path: str, resume: str | None = None):
         lr_lambda=lambda e: warmup_lr_lambda(e, train_cfg["warmup_epochs"]),
     )
 
-    criterion = WeightedMSELoss()
+    criterion = build_criterion(cfg).to(device)
+    loss_name = cfg["training"].get("loss", "weighted_mse")
+    logger.info("Loss: %s", loss_name)
 
     # Output dir: outputs/<run_name>_<timestamp>/
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -319,13 +321,14 @@ def train(config_path: str, resume: str | None = None):
 
         optimizer.zero_grad(set_to_none=True)
         batch_bar = tqdm(train_loader, desc=f"  Epoch {epoch:02d}", leave=False, unit="batch")
-        for step, (images, labels, _genders) in enumerate(batch_bar):
+        for step, (images, labels, genders) in enumerate(batch_bar):
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
+            genders = genders.to(device, non_blocking=True)
 
             with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
                 preds = model(images)
-                loss = criterion(preds, labels) / grad_accum
+                loss = criterion(preds, labels, genders) / grad_accum
 
             if scaler.is_enabled():
                 scaler.scale(loss).backward()
