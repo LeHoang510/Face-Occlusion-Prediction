@@ -48,7 +48,8 @@ The leaderboard score combines weighted accuracy and gender fairness (lower is b
   \mathrm{Score} = \frac{\mathrm{Err}_F + \mathrm{Err}_M}{2} + \lvert \mathrm{Err}_F - \mathrm{Err}_M \rvert .
 \end{equation*}
 Weights penalise errors on heavily occluded faces; the disparity term encourages balanced performance across genders.
-All models are trained with the same weighted MSE objective, a 90/10 train/val split (seed 42), and standard augmentations (resize, flip, colour jitter).
+All models optimise the same weighted MSE objective with standard augmentations (resize, flip, colour jitter).
+During development we hold out 10\% of labelled data for validation (seed 42); the submitted checkpoint is retrained on the \emph{full} training set.
 
 \section*{Methods Explored}
 \paragraph{Phase 1 --- CNN/ViT baselines.}
@@ -62,7 +63,8 @@ We apply this to our strongest Phase-1 model (Swin-T) while keeping the same arc
 \paragraph{Phase 3 --- DINOv3-L + LoRA.}
 We adopt \texttt{facebook/dinov3-vitl16-pretrain-lvd1689m} (ViT-L/16), freeze the backbone, and inject LoRA adapters ($r{=}16$) on attention projections.
 Only LoRA weights and a regression head are trained---a parameter-efficient alternative to full fine-tuning.
-We train both a standard random sampler and a balanced-gender variant (Table~\ref{tab:baselines}).
+We train both a standard random sampler and a balanced-gender variant; Table~\ref{tab:baselines} reports validation scores from the development split.
+The final submission retrains the best DINOv3-L + LoRA configuration on all labelled training data.
 
 \section*{Submitted Solution: DINOv3-L + LoRA}
 \paragraph{Architecture.}
@@ -91,13 +93,14 @@ Only $\sim$2\% of parameters are trainable (LoRA + head).
 \end{figure}
 
 \paragraph{Training.}
-AdamW ($\mathrm{lr}{=}5{\times}10^{-4}$, weight decay $10^{-4}$), cosine schedule with 1-epoch warmup, gradient clipping at 1.0; 15 epochs, batch size 64 on one RTX~3090 ($\sim$6\,h).
-The best checkpoint (epoch~8) is submitted.
+We first tune hyper-parameters with a 90/10 train/val split, then retrain on the full labelled training set for submission.
+Training uses AdamW ($\mathrm{lr}{=}5{\times}10^{-4}$, weight decay $10^{-4}$), cosine schedule with 1-epoch warmup, gradient clipping at 1.0; 15 epochs, batch size 64 on one RTX~3090 ($\sim$6\,h).
+The development run reaches its best validation score at epoch~8 (Table~\ref{tab:baselines}); this configuration is reused for the full-data retraining that produces our leaderboard submission.
 
 \section*{Results}
 \begin{table}[h]
 \centering
-\caption{Best validation scores across explored models (lower is better).}
+\caption{Best validation scores during model selection (90/10 split; lower is better).}
 \label{tab:baselines}
 \small
 \begin{tabular}{@{}lcccc@{}}
@@ -140,7 +143,6 @@ DINOv3-L + LoRA (balanced) & 0.001129 & 0.000525 & 0.000928 & 14 \\
 \begin{itemize}
   \item \textbf{Close the gender gap:} combine LoRA fine-tuning with balanced-gender batching (which lowered $\mathrm{Err}_F$ in isolation) and tune the loss to better match the $|{\mathrm{Err}_F - \mathrm{Err}_M}|$ penalty.
   \item \textbf{Ensemble:} average or stack predictions from DINOv3-L + LoRA with strong CNN/ViT baselines (e.g.\ Swin-T) to exploit complementary errors.
-  \item \textbf{Final retraining:} once the best configuration is fixed, retrain on train\,+\,val and submit the resulting checkpoint.
 \end{itemize}
 
 \end{document}
