@@ -255,7 +255,21 @@ def train(config_path: str, resume: str | None = None):
 
     criterion = build_criterion(cfg).to(device)
     loss_name = cfg["training"].get("loss", "weighted_mse")
-    logger.info("Loss: %s", loss_name)
+    # Log key hyperparameters explicitly so a stale-config submission is obvious
+    # at-a-glance in the SLURM .out (instead of hidden inside a copied config.yaml).
+    loss_extras = []
+    if loss_name == "balanced_aligned":
+        loss_extras.append(f"alpha={float(cfg['training'].get('balanced_aligned_alpha', 1.0))}")
+    elif loss_name == "group_dro":
+        loss_extras.append(f"eta={float(cfg['training'].get('group_dro_eta', 0.01))}")
+    extras = f" ({', '.join(loss_extras)})" if loss_extras else ""
+    logger.info("Loss: %s%s", loss_name, extras)
+    logger.info(
+        "Run config: epochs=%d, warmup=%d, batch=%d, batching=%s, seed=%d",
+        train_cfg["epochs"], train_cfg["warmup_epochs"], train_cfg["batch_size"],
+        cfg["training"].get("batching", {}).get("strategy", "random"),
+        train_cfg["seed"],
+    )
 
     # Output dir: outputs/<run_name>_<timestamp>/
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
