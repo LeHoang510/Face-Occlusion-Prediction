@@ -26,3 +26,6 @@ logs/*.log.*
 outputs/*
 !outputs/.gitkeep
 checkpoints/*
+
+logs/
+.env

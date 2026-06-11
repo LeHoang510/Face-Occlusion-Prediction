@@ -16,16 +16,10 @@ from tqdm import tqdm
 
 from data_challenge.data.dataset import OcclusionDataset, get_transforms
 from data_challenge.data.samplers import BalancedGenderBatchSampler
-from data_challenge.models.cnn_baseline import CNNBaseline
+from data_challenge.models import build_model
 from data_challenge.utils.logger import setup_logger
 from data_challenge.utils.losses import WeightedMSELoss
 from data_challenge.utils.metrics import compute_score
-
-
-def count_trainable_parameters(model) -> tuple[int, int]:
-    total = sum(param.numel() for param in model.parameters())
-    trainable = sum(param.numel() for param in model.parameters() if param.requires_grad)
-    return trainable, total
 
 
 def set_seed(seed: int):
@@ -161,28 +155,22 @@ def train(config_path: str):
     logger.info("Train: %d samples | Val: %d samples", train_size, val_size)
     logger.info("Train batching strategy: %s", cfg["training"].get("batching", {}).get("strategy", "random"))
 
-    # Model
-    model_cfg = cfg["model"]
-    model = CNNBaseline(
-        backbone=model_cfg["backbone"],
-        pretrained=model_cfg["pretrained"],
-        dropout=model_cfg["dropout"],
-        img_size=data_cfg["img_size"],
-        freeze_backbone=model_cfg.get("freeze_backbone", False),
-    ).to(device)
-    trainable_params, total_params = count_trainable_parameters(model)
+    # Model (factory: cnn_baseline | dinov3)
+    model = build_model(cfg).to(device)
+    n_total = sum(p.numel() for p in model.parameters())
+    optimizer_params = [p for p in model.parameters() if p.requires_grad]
+    n_trainable = sum(p.numel() for p in optimizer_params)
     logger.info(
-        "Model: %s (pretrained=%s, freeze_backbone=%s)",
-        model_cfg["backbone"],
-        model_cfg["pretrained"],
-        model_cfg.get("freeze_backbone", False),
+        "Model: %s | trainable=%s / total=%s (%.2f%%)",
+        cfg["model"].get("name", "cnn_baseline"),
+        f"{n_trainable:,}", f"{n_total:,}", 100.0 * n_trainable / max(n_total, 1),
     )
-    logger.info("Trainable params: %d / %d", trainable_params, total_params)
 
-    # Optimizer & scheduler
+    # Optimizer & scheduler — only optimize params with requires_grad=True
+    # (LoRA + head only when backbone is frozen)
     train_cfg = cfg["training"]
     optimizer = torch.optim.AdamW(
-        (param for param in model.parameters() if param.requires_grad),
+        optimizer_params,
         lr=train_cfg["learning_rate"],
         weight_decay=train_cfg["weight_decay"],
     )
@@ -269,11 +257,14 @@ def train(config_path: str):
 
     summary = {
         "run_name": cfg["run_name"],
-        "backbone": cfg["model"]["backbone"],
+        "model_name": cfg["model"].get("name", "cnn_baseline"),
+        "backbone": cfg["model"].get("backbone") or cfg["model"].get("model_id"),
         "freeze_backbone": cfg["model"].get("freeze_backbone", False),
         "best_val_score": best_score,
         "best_epoch": best_epoch,
         "epochs": train_cfg["epochs"],
+        "trainable_params": n_trainable,
+        "total_params": n_total,
         "wandb_run_id": wandb_run.id if wandb_run else None,
         "wandb_url": wandb_run.url if wandb_run else None,
     }

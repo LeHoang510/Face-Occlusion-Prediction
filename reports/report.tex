@@ -1,0 +1,149 @@
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[margin=1.8cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage{enumitem}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!70!black,
+}
+
+\setlength{\parskip}{0.35em}
+\setlength{\parindent}{0pt}
+\setlist{nosep, leftmargin=*}
+
+\title{\vspace{-1.2em}\textbf{Face Occlusion Prediction}\\[0.3em]
+\large Model Training Track --- Data Challenge 2026}
+\author{\textbf{OccluVision} \quad (Group~8)\\[0.3em]
+LATOUNDJI Mourad \quad$\cdot$\quad NGUYEN Le Hoang \quad$\cdot$\quad ZHANG Chengbo\\[0.3em]
+\url{https://github.com/LeHoang510/Face-Occlusion-Prediction}}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-1.8em}
+
+\section*{Introduction}
+Face occlusion estimation quantifies how much of a detected face is hidden (masks, hands, objects), which matters for downstream biometrics and fairness-aware systems.
+In the Model Training Track we regress a continuous occlusion ratio in $[0,1]$ from $224{\times}224$ RGB face crops.
+The evaluation metric penalises errors on heavily occluded samples and rewards balanced performance across genders, so accuracy alone is insufficient.
+We pursued a three-phase pipeline: (i)~benchmark diverse CNN/ViT backbones, (ii)~test stronger training and architectural variants including balanced batching, frozen backbones, segmentation-aware features, and multitask heads, and (iii)~fine-tune a large self-supervised encoder with parameter-efficient adapters.
+Our submitted model---DINOv3-L + LoRA---ranks \textbf{3rd} on the interim leaderboard (score \textbf{0.00099}); code is available at the repository link above.
+
+\section*{Task \& Metric}
+The leaderboard score combines weighted accuracy and gender fairness (lower is better):
+\begin{equation*}
+  w_i = \tfrac{1}{30} + \mathrm{GT}_i, \quad
+  \mathrm{Err} = \frac{\sum_i w_i(p_i - \mathrm{GT}_i)^2}{\sum_i w_i}, \quad
+  \mathrm{Score} = \frac{\mathrm{Err}_F + \mathrm{Err}_M}{2} + \lvert \mathrm{Err}_F - \mathrm{Err}_M \rvert .
+\end{equation*}
+Weights penalise errors on heavily occluded faces; the disparity term encourages balanced performance across genders.
+All models optimise the same weighted MSE objective with standard augmentations (resize, flip, colour jitter).
+During development we hold out 10\% of labelled data for validation (seed 42); the submitted checkpoint is retrained on the \emph{full} training set.
+
+\section*{Methods Explored}
+\paragraph{Phase 1 --- CNN/ViT baselines.}
+We fine-tune ImageNet-pretrained backbones from \texttt{timm}/\texttt{torchvision}: ResNet-50, ConvNeXt-Tiny, Swin-T, ViT-B/16, EfficientViT-B1, and DINOv2-Small.
+Each replaces the classification head with a dropout-regularised MLP ending in Sigmoid; all backbone weights are updated (up to 20 epochs, batch size 32, AdamW with cosine decay).
+
+\paragraph{Phase 2 --- Advanced experiments.}
+Beyond plain backbone fine-tuning, we tested four extensions: balanced-gender mini-batches to reduce the $|{\mathrm{Err}_F - \mathrm{Err}_M}|$ penalty, frozen-backbone variants with lightweight heads, segmentation-aware auxiliary features from person masks, and multitask heads that jointly predict occlusion and gender.
+Table~\ref{tab:baselines} reports the preserved validation results.
+
+\paragraph{Phase 3 --- DINOv3-L + LoRA.}
+We adopt \texttt{facebook/dinov3-vitl16-pretrain-lvd1689m} (ViT-L/16), freeze the backbone, and inject LoRA adapters ($r{=}16$) on attention projections.
+Only LoRA weights and a regression head are trained---a parameter-efficient alternative to full fine-tuning.
+We train both a standard random sampler and a balanced-gender variant; Table~\ref{tab:baselines} reports validation scores from the development split.
+The final submission retrains the best DINOv3-L + LoRA configuration on all labelled training data.
+
+\section*{Submitted Solution: DINOv3-L + LoRA}
+\paragraph{Architecture.}
+We freeze \texttt{facebook/dinov3-vitl16-pretrain-lvd1689m} (ViT-L/16, 1.1B params) and inject LoRA adapters ($r{=}16$, $\alpha{=}32$, dropout $0.05$) on \texttt{q\_proj} and \texttt{v\_proj}.
+The CLS token feeds a regression head: LayerNorm $\rightarrow$ MLP(512, GELU) $\rightarrow$ Linear $\rightarrow$ Sigmoid.
+Only $\sim$2\% of parameters are trainable (LoRA + head).
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners, minimum height=0.65cm, font=\small},
+  arr/.style={-{Stealth[length=2mm]}, thick}
+]
+  \node[box, fill=blue!8, minimum width=2.4cm] (img) {Face crop};
+  \node[box, fill=orange!12, minimum width=3.2cm, right=0.5cm of img] (bb) {DINOv3-L (frozen)};
+  \node[box, fill=green!10, minimum width=2.0cm, right=0.35cm of bb] (lora) {LoRA};
+  \node[box, fill=purple!10, minimum width=2.2cm, right=0.5cm of lora] (head) {MLP head};
+  \node[box, fill=gray!10, minimum width=1.6cm, right=0.5cm of head] (out) {$\hat{y}$};
+  \draw[arr] (img) -- (bb);
+  \draw[arr] (bb) -- (lora);
+  \draw[arr] (lora) -- (head);
+  \draw[arr] (head) -- (out);
+\end{tikzpicture}
+\caption{Submitted pipeline: frozen DINOv3-L backbone with LoRA adapters and a lightweight MLP head.}
+\label{fig:arch}
+\end{figure}
+
+\paragraph{Training.}
+We first tune hyper-parameters with a 90/10 train/val split, then retrain on the full labelled training set for submission.
+Training uses AdamW ($\mathrm{lr}{=}5{\times}10^{-4}$, weight decay $10^{-4}$), cosine schedule with 1-epoch warmup, gradient clipping at 1.0; 15 epochs, batch size 64 on one RTX~3090 ($\sim$6\,h).
+The development run reaches its best validation score at epoch~9 (Table~\ref{tab:baselines}); this configuration is reused for the full-data retraining that produces our leaderboard submission.
+
+\section*{Results}
+\begin{table}[h]
+\centering
+\caption{Best preserved validation scores during model selection (90/10 split; lower is better).}
+\label{tab:baselines}
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Model} & \textbf{Score} & $\mathrm{Err}_F$ & $\mathrm{Err}_M$ & \textbf{Ep.} \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Phase 1 --- CNN/ViT baselines}} \\
+Swin-T & 0.001090 & 0.000481 & 0.000887 & 15 \\
+ConvNeXt-Tiny & 0.001112 & 0.000671 & 0.000965 & 4 \\
+ViT-B/16 & 0.001162 & 0.000563 & 0.000962 & 9 \\
+ResNet-50 & 0.001221 & 0.000536 & 0.000992 & 12 \\
+EfficientViT-B1 & 0.001285 & 0.000660 & 0.001076 & 9 \\
+DINOv2-Small & 0.001469 & 0.000693 & 0.001210 & 19 \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Phase 2 --- advanced experiments}} \\
+ConvNeXt-Tiny (balanced) & 0.001097 & 0.000462 & 0.000885 & 14 \\
+ResNet-50 (balanced) & 0.001134 & 0.000492 & 0.000920 & 14 \\
+Swin-T (balanced) & 0.001150 & 0.000547 & 0.000949 & 11 \\
+ViT-B/16 (balanced) & 0.001157 & 0.000628 & 0.000980 & 7 \\
+ResNet-50 (multitask) & 0.001318 & 0.000659 & 0.001103 & 17 \\
+Swin-T (segmentation-aux) & 0.002672 & 0.002660 & 0.002672 & 20 \\
+ConvNeXt-Tiny (segmentation-aux) & 0.002777 & 0.002139 & 0.002565 & 20 \\
+\midrule
+\multicolumn{5}{@{}l}{\textit{Phase 3 --- DINOv3 (submitted model in bold)}} \\
+\textbf{DINOv3-L + LoRA} & \textbf{0.001059} & \textbf{0.000567} & \textbf{0.000895} & 9 \\
+DINOv3-L + LoRA (balanced) & 0.001129 & 0.000525 & 0.000928 & 15 \\
+DINOv3-L (full fine-tuning) & 0.001216 & 0.000693 & 0.001041 & 9 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{Limitations \& Outlook}
+\paragraph{Limitations.}
+\begin{itemize}
+  \item \textbf{Compute:} Limited training budget---all experiments were capped at 20 epochs, which may leave performance on the table.
+  \item \textbf{Hyper-parameters:} LoRA rank, learning rate, batch size, and epoch count all affect the fairness--accuracy trade-off; we did not run a full grid search.
+  \item \textbf{Gender gap:} Despite the metric penalty, male error remains higher than female error on validation.
+  \item \textbf{Incomplete archives:} Some frozen-backbone, segmentation, and multitask runs were configured but their full metrics were not preserved locally, so Table~\ref{tab:baselines} includes only recoverable results.
+\end{itemize}
+\paragraph{Future work.}
+\begin{itemize}
+  \item \textbf{Close the gender gap:} combine LoRA fine-tuning with balanced-gender batching (which lowered $\mathrm{Err}_F$ in isolation) and tune the loss to better match the $|{\mathrm{Err}_F - \mathrm{Err}_M}|$ penalty.
+  \item \textbf{Ensemble:} average or stack predictions from DINOv3-L + LoRA with strong CNN/ViT baselines (e.g.\ Swin-T) to exploit complementary errors.
+\end{itemize}
+
+\end{document}
