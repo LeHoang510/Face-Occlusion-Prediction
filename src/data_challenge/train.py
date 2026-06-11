@@ -18,8 +18,45 @@ from data_challenge.data.dataset import OcclusionDataset, get_transforms
 from data_challenge.data.samplers import BalancedGenderBatchSampler
 from data_challenge.models import build_model
 from data_challenge.utils.logger import setup_logger
-from data_challenge.utils.losses import WeightedMSELoss
+from data_challenge.utils.losses import build_criterion
 from data_challenge.utils.metrics import compute_score
+
+
+_AMP_DTYPES = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
+
+
+def build_optimizer(model: nn.Module, cfg: dict, trainable_params: list[nn.Parameter]):
+    """Return AdamW. Uses head/backbone LR split + LLRD when configured for DINOv3.
+
+    Activated when both `training.learning_rate_head` and `training.learning_rate_backbone`
+    are set AND the model is dinov3. Otherwise falls back to the single-LR AdamW.
+    """
+    train_cfg = cfg["training"]
+    model_name = cfg["model"].get("name", "cnn_baseline")
+    lr_head = train_cfg.get("learning_rate_head")
+    lr_bb = train_cfg.get("learning_rate_backbone")
+
+    if model_name == "dinov3" and lr_head is not None and lr_bb is not None:
+        from data_challenge.models.dinov3 import build_param_groups
+
+        groups = build_param_groups(
+            model,
+            lr_backbone=float(lr_bb),
+            lr_head=float(lr_head),
+            weight_decay=float(train_cfg["weight_decay"]),
+            llrd_decay=float(train_cfg.get("llrd_decay", 1.0)),
+            n_layers=int(cfg["model"].get("n_layers", 24)),
+        )
+        return torch.optim.AdamW(groups), True
+
+    return (
+        torch.optim.AdamW(
+            trainable_params,
+            lr=train_cfg["learning_rate"],
+            weight_decay=train_cfg["weight_decay"],
+        ),
+        False,
+    )
 
 
 def set_seed(seed: int):
@@ -98,7 +135,7 @@ def create_train_loader(train_ds, full_dataset, cfg):
     )
 
 
-def train(config_path: str):
+def train(config_path: str, resume: str | None = None):
     cfg = load_config(config_path)
     set_seed(cfg["training"]["seed"])
 
@@ -157,6 +194,15 @@ def train(config_path: str):
 
     # Model (factory: cnn_baseline | dinov3)
     model = build_model(cfg).to(device)
+
+    # Optional gradient checkpointing (essential for full FT of ViT-L on 24G GPUs)
+    if cfg["model"].get("gradient_checkpointing", False):
+        if hasattr(model, "enable_gradient_checkpointing"):
+            model.enable_gradient_checkpointing()
+            logger.info("Gradient checkpointing: ENABLED")
+        else:
+            logger.warning("gradient_checkpointing requested but model has no such method")
+
     n_total = sum(p.numel() for p in model.parameters())
     optimizer_params = [p for p in model.parameters() if p.requires_grad]
     n_trainable = sum(p.numel() for p in optimizer_params)
@@ -166,13 +212,33 @@ def train(config_path: str):
         f"{n_trainable:,}", f"{n_total:,}", 100.0 * n_trainable / max(n_total, 1),
     )
 
-    # Optimizer & scheduler — only optimize params with requires_grad=True
-    # (LoRA + head only when backbone is frozen)
+    # Optimizer & scheduler — head/backbone LR split + LLRD when configured.
     train_cfg = cfg["training"]
-    optimizer = torch.optim.AdamW(
-        optimizer_params,
-        lr=train_cfg["learning_rate"],
-        weight_decay=train_cfg["weight_decay"],
+    optimizer, used_split_lr = build_optimizer(model, cfg, optimizer_params)
+    if used_split_lr:
+        logger.info(
+            "Optimizer: AdamW with %d param groups (head_lr=%.2e, backbone_lr=%.2e, llrd=%.2f)",
+            len(optimizer.param_groups),
+            float(train_cfg["learning_rate_head"]),
+            float(train_cfg["learning_rate_backbone"]),
+            float(train_cfg.get("llrd_decay", 1.0)),
+        )
+    else:
+        logger.info("Optimizer: AdamW single group (lr=%.2e)", float(train_cfg["learning_rate"]))
+
+    # Mixed precision setup
+    amp_dtype_str = str(train_cfg.get("amp_dtype", "fp32")).lower()
+    if amp_dtype_str not in _AMP_DTYPES:
+        raise ValueError(f"amp_dtype must be one of {list(_AMP_DTYPES)}, got {amp_dtype_str!r}")
+    amp_dtype = _AMP_DTYPES[amp_dtype_str]
+    use_amp = amp_dtype != torch.float32 and device.type == "cuda"
+    # GradScaler is only needed for fp16; bf16 has fp32 dynamic range
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp and amp_dtype == torch.float16)
+    grad_accum = max(int(train_cfg.get("gradient_accumulation_steps", 1)), 1)
+    effective_bs = train_cfg["batch_size"] * grad_accum
+    logger.info(
+        "Precision: amp_dtype=%s use_amp=%s scaler=%s | grad_accum=%d (effective batch=%d)",
+        amp_dtype_str, use_amp, scaler.is_enabled(), grad_accum, effective_bs,
     )
 
     if train_cfg["scheduler"] == "cosine":
@@ -187,7 +253,23 @@ def train(config_path: str):
         lr_lambda=lambda e: warmup_lr_lambda(e, train_cfg["warmup_epochs"]),
     )
 
-    criterion = WeightedMSELoss()
+    criterion = build_criterion(cfg).to(device)
+    loss_name = cfg["training"].get("loss", "weighted_mse")
+    # Log key hyperparameters explicitly so a stale-config submission is obvious
+    # at-a-glance in the SLURM .out (instead of hidden inside a copied config.yaml).
+    loss_extras = []
+    if loss_name == "balanced_aligned":
+        loss_extras.append(f"alpha={float(cfg['training'].get('balanced_aligned_alpha', 1.0))}")
+    elif loss_name == "group_dro":
+        loss_extras.append(f"eta={float(cfg['training'].get('group_dro_eta', 0.01))}")
+    extras = f" ({', '.join(loss_extras)})" if loss_extras else ""
+    logger.info("Loss: %s%s", loss_name, extras)
+    logger.info(
+        "Run config: epochs=%d, warmup=%d, batch=%d, batching=%s, seed=%d",
+        train_cfg["epochs"], train_cfg["warmup_epochs"], train_cfg["batch_size"],
+        cfg["training"].get("batching", {}).get("strategy", "random"),
+        train_cfg["seed"],
+    )
 
     # Output dir: outputs/<run_name>_<timestamp>/
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -197,28 +279,95 @@ def train(config_path: str):
     logger.info("Run output dir: %s", run_dir)
 
     best_score = float("inf")
+    best_epoch = 0
     best_ckpt = os.path.join(run_dir, "best_model.pt")
     last_ckpt = os.path.join(run_dir, "last_model.pt")
 
-    epoch_bar = tqdm(range(1, train_cfg["epochs"] + 1), desc="Training", unit="epoch")
+    # -----------------------------------------------------------------------
+    # Resume: load weights (+ optimizer state if present), fast-forward
+    # schedulers so the cosine curve continues from the right point.
+    # -----------------------------------------------------------------------
+    start_epoch = 1
+    if resume is not None:
+        logger.info("Resuming from: %s", resume)
+        ckpt_in = torch.load(resume, map_location=device)
+        missing, unexpected = model.load_state_dict(ckpt_in["model_state"], strict=False)
+        if missing:
+            logger.warning("  %d missing keys", len(missing))
+        if unexpected:
+            logger.warning("  %d unexpected keys", len(unexpected))
+        if "optimizer_state" in ckpt_in:
+            try:
+                optimizer.load_state_dict(ckpt_in["optimizer_state"])
+                logger.info("  optimizer state restored")
+            except Exception as e:
+                logger.warning("  optimizer state restore failed: %s", e)
+        else:
+            logger.info("  optimizer state not in checkpoint — using fresh AdamW state (warm-start)")
+        last_epoch = int(ckpt_in.get("epoch", 0))
+        start_epoch = last_epoch + 1
+        best_score = float(ckpt_in.get("best_score", ckpt_in.get("score", float("inf"))))
+        best_epoch = int(ckpt_in.get("best_epoch", last_epoch))
+        # Fast-forward schedulers to start_epoch (replays the per-epoch step pattern)
+        for ep in range(1, start_epoch):
+            if ep <= train_cfg["warmup_epochs"]:
+                warmup_scheduler.step()
+            else:
+                base_scheduler.step()
+        logger.info(
+            "  resumed: start_epoch=%d  prev_best=%.5f@ep%d  current_lr=%.2e",
+            start_epoch, best_score, best_epoch, optimizer.param_groups[0]["lr"],
+        )
+
+    if start_epoch > train_cfg["epochs"]:
+        logger.warning(
+            "Nothing to do: checkpoint already at epoch %d, config.epochs=%d. "
+            "Bump training.epochs in the config to continue.",
+            start_epoch - 1, train_cfg["epochs"],
+        )
+        return
+
+    epoch_bar = tqdm(range(start_epoch, train_cfg["epochs"] + 1), desc="Training", unit="epoch")
     for epoch in epoch_bar:
         model.train()
         running_loss = 0.0
+        n_batches = len(train_loader)
 
+        optimizer.zero_grad(set_to_none=True)
         batch_bar = tqdm(train_loader, desc=f"  Epoch {epoch:02d}", leave=False, unit="batch")
-        for images, labels, _genders in batch_bar:
-            images, labels = images.to(device), labels.to(device)
-            optimizer.zero_grad()
-            preds = model(images)
-            loss = criterion(preds, labels)
-            loss.backward()
-            if train_cfg.get("gradient_clip"):
-                nn.utils.clip_grad_norm_(model.parameters(), train_cfg["gradient_clip"])
-            optimizer.step()
-            running_loss += loss.item()
-            batch_bar.set_postfix(loss=f"{loss.item():.5f}")
+        for step, (images, labels, genders) in enumerate(batch_bar):
+            images = images.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
+            genders = genders.to(device, non_blocking=True)
 
-        train_loss = running_loss / len(train_loader)
+            with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
+                preds = model(images)
+                loss = criterion(preds, labels, genders) / grad_accum
+
+            if scaler.is_enabled():
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
+
+            is_boundary = (step + 1) % grad_accum == 0 or (step + 1) == n_batches
+            if is_boundary:
+                if train_cfg.get("gradient_clip"):
+                    if scaler.is_enabled():
+                        scaler.unscale_(optimizer)
+                    nn.utils.clip_grad_norm_(optimizer_params, train_cfg["gradient_clip"])
+                if scaler.is_enabled():
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+
+            # un-scale for logging the raw per-batch loss
+            unscaled = loss.item() * grad_accum
+            running_loss += unscaled
+            batch_bar.set_postfix(loss=f"{unscaled:.5f}")
+
+        train_loss = running_loss / n_batches
 
         if epoch <= train_cfg["warmup_epochs"]:
             warmup_scheduler.step()
@@ -246,13 +395,25 @@ def train(config_path: str):
                 "lr": current_lr,
             })
 
-        ckpt = {"epoch": epoch, "model_state": model.state_dict(), "score": score}
-        torch.save(ckpt, last_ckpt)
+        # last_model.pt carries the full state (model + optimizer) so it is
+        # resumable. best_model.pt stays lightweight (model only) for inference.
+        last_payload = {
+            "epoch": epoch,
+            "model_state": model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
+            "score": score,
+            "best_score": best_score if score >= best_score else score,
+            "best_epoch": best_epoch if score >= best_score else epoch,
+        }
+        torch.save(last_payload, last_ckpt)
 
         if score < best_score:
             best_score = score
             best_epoch = epoch
-            torch.save(ckpt, best_ckpt)
+            torch.save(
+                {"epoch": epoch, "model_state": model.state_dict(), "score": score},
+                best_ckpt,
+            )
             logger.info("  -> New best score %.5f (lower is better), checkpoint saved.", best_score)
 
     summary = {
@@ -265,6 +426,10 @@ def train(config_path: str):
         "epochs": train_cfg["epochs"],
         "trainable_params": n_trainable,
         "total_params": n_total,
+        "amp_dtype": amp_dtype_str,
+        "gradient_accumulation_steps": grad_accum,
+        "effective_batch_size": effective_bs,
+        "split_lr": used_split_lr,
         "wandb_run_id": wandb_run.id if wandb_run else None,
         "wandb_url": wandb_run.url if wandb_run else None,
     }
@@ -281,5 +446,10 @@ def train(config_path: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train face occlusion model")
     parser.add_argument("--config", default="src/data_challenge/configs/base_config.yaml")
+    parser.add_argument(
+        "--resume",
+        default=None,
+        help="Path to a checkpoint to resume from (best_model.pt or last_model.pt)",
+    )
     args = parser.parse_args()
-    train(args.config)
+    train(args.config, resume=args.resume)

@@ -28,10 +28,21 @@ source "$PROJECT_ROOT/scripts/slurm/_common.sh"
 CONFIG="${CONFIG:?train.sh: CONFIG env var required (path to yaml)}"
 SKIP_EVAL="${SKIP_EVAL:-0}"
 
+# Optional: forward RESUME_CHECKPOINT to train.py --resume.
+RESUME_ARG=()
+if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
+  if [[ ! -f "$RESUME_CHECKPOINT" ]]; then
+    echo "[train] ERROR: RESUME_CHECKPOINT='$RESUME_CHECKPOINT' not found" >&2
+    exit 2
+  fi
+  RESUME_ARG=(--resume "$RESUME_CHECKPOINT")
+  echo "[train] resuming from: $RESUME_CHECKPOINT"
+fi
+
 echo "[train] starting: config=$CONFIG"
 START_TS=$(date +%s)
 
-if $RUN_PREFIX python src/data_challenge/train.py --config "$CONFIG"; then
+if $RUN_PREFIX python src/data_challenge/train.py --config "$CONFIG" "${RESUME_ARG[@]}"; then
   ELAPSED=$(( $(date +%s) - START_TS ))
   echo "[train] success in ${ELAPSED}s"
 
