@@ -1,0 +1,57 @@
+project_name: data-challenge-occlusion
+run_name: dinov3_l_lora_balanced
+
+# Same architecture as the LoRA baseline ; the loss mirrors the eval metric:
+#   L = (L_F + L_M) / 2 + alpha * |L_F - L_M|
+# With alpha=1.0 this is exactly the metric formula. Lower alpha softens the
+# fairness penalty if early epochs become unstable.
+
+data:
+  train_csv: dataset/DataChallenge2026/occlusion_datasets/train.csv
+  test_csv: dataset/DataChallenge2026/occlusion_datasets/test_students.csv
+  img_root: dataset/crops/Crop_224_5fp_100K
+  val_split: 0.1
+  img_size: 224
+  num_workers: 8
+
+model:
+  name: dinov3
+  model_id: facebook/dinov3-vitl16-pretrain-lvd1689m
+  freeze_backbone: true
+  trust_remote_code: true
+  head_dropout: 0.05
+  hidden_dim: 512
+  lora:
+    enabled: true
+    r: 32
+    alpha: 64
+    dropout: 0.05
+    # Match v2: adapt attention + MLP projections (more capacity than q/v only)
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj"]
+    bias: none
+
+training:
+  epochs: 25
+  batch_size: 64
+  # Use head/backbone LR split (activates split-LR optimizer path in train.py)
+  learning_rate_head: 5.0e-4
+  learning_rate_backbone: 3.0e-4
+  weight_decay: 1.0e-4
+  scheduler: cosine
+  warmup_epochs: 2
+  seed: 42
+  gradient_clip: 1.0
+  amp_dtype: bf16
+  loss: balanced_aligned
+  # alpha=1.0 matches the eval metric exactly: (ErrF+ErrM)/2 + |ErrF-ErrM|
+  balanced_aligned_alpha: 1.0
+  batching:
+    strategy: balanced_gender
+
+wandb:
+  enabled: true
+  project: data-challenge-occlusion
+  entity: null
+
+output:
+  dir: outputs
