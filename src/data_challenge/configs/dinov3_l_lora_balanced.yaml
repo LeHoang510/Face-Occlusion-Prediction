@@ -19,28 +19,32 @@ model:
   model_id: facebook/dinov3-vitl16-pretrain-lvd1689m
   freeze_backbone: true
   trust_remote_code: true
-  head_dropout: 0.1
+  head_dropout: 0.05
   hidden_dim: 512
   lora:
     enabled: true
-    r: 16
-    alpha: 32
+    r: 32
+    alpha: 64
     dropout: 0.05
-    target_modules: ["q_proj", "v_proj"]
+    # Match v2: adapt attention + MLP projections (more capacity than q/v only)
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj"]
     bias: none
 
 training:
-  epochs: 20
+  epochs: 25
   batch_size: 64
-  learning_rate: 5.0e-4
+  # Use head/backbone LR split (activates split-LR optimizer path in train.py)
+  learning_rate_head: 5.0e-4
+  learning_rate_backbone: 3.0e-4
   weight_decay: 1.0e-4
   scheduler: cosine
-  warmup_epochs: 1
+  warmup_epochs: 2
   seed: 42
   gradient_clip: 1.0
   amp_dtype: bf16
   loss: balanced_aligned
-  balanced_aligned_alpha: 0.3   # exact metric ; try 0.5 if training is unstable
+  # alpha=1.0 matches the eval metric exactly: (ErrF+ErrM)/2 + |ErrF-ErrM|
+  balanced_aligned_alpha: 1.0
   batching:
     strategy: balanced_gender
 
