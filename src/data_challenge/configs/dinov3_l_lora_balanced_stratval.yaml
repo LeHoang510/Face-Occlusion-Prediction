@@ -1,0 +1,64 @@
+project_name: data-challenge-occlusion
+run_name: dinov3_l_lora_balanced_stratval
+
+# Same recipe as dinov3_l_lora_balanced (balanced batching + metric-aligned loss),
+# but the VALIDATION split is now gender-stratified to mirror the test set.
+#
+# Why: the challenge metric is heavy-tailed (weighted MSE dominated by rare
+# high-occlusion faces) and the |ErrF-ErrM| term amplifies that. A single random
+# 10% val is therefore a NOISY estimator: bootstrap 95% CI ~ [0.00075, 0.00147]
+# on a 10k split, so the 0.00105 vs 0.00117 leaderboard "gap" is within noise,
+# not a systematic bias. This split stratifies by gender x occlusion (val 50/50,
+# mirroring the test) to reduce split-to-split variance and make the score
+# reproducible. It is a lower-variance estimator, not a perfect one — for a
+# truly trustworthy number, k-fold CV is the next step.
+
+data:
+  train_csv: dataset/DataChallenge2026/occlusion_datasets/train.csv
+  test_csv: dataset/DataChallenge2026/occlusion_datasets/test_students.csv
+  img_root: dataset/crops/Crop_224_5fp_100K
+  val_split: 0.1
+  img_size: 224
+  num_workers: 8
+  # ---- validation split (the change vs dinov3_l_lora_balanced) ----
+  val_split_strategy: stratified_gender   # random | stratified_gender
+  val_female_ratio: 0.5                   # mirror the 50/50 test set ; null = keep train ratio
+
+model:
+  name: dinov3
+  model_id: facebook/dinov3-vitl16-pretrain-lvd1689m
+  freeze_backbone: true
+  trust_remote_code: true
+  head_dropout: 0.05
+  hidden_dim: 512
+  lora:
+    enabled: true
+    r: 32
+    alpha: 64
+    dropout: 0.05
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj"]
+    bias: none
+
+training:
+  epochs: 25
+  batch_size: 64
+  learning_rate_head: 5.0e-4
+  learning_rate_backbone: 3.0e-4
+  weight_decay: 1.0e-4
+  scheduler: cosine
+  warmup_epochs: 2
+  seed: 42
+  gradient_clip: 1.0
+  amp_dtype: bf16
+  loss: balanced_aligned
+  balanced_aligned_alpha: 1.0           # exact metric ; tune now against the HONEST val
+  batching:
+    strategy: balanced_gender
+
+wandb:
+  enabled: true
+  project: data-challenge-occlusion
+  entity: null
+
+output:
+  dir: outputs

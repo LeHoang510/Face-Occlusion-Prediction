@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import yaml
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset, random_split
 from tqdm import tqdm
 
 from data_challenge.data.dataset import OcclusionDataset, get_transforms
@@ -167,19 +167,40 @@ def train(config_path: str, resume: str | None = None):
         transform=get_transforms(train=True, img_size=data_cfg["img_size"]),
     )
 
-    val_size = int(len(full_dataset) * data_cfg["val_split"])
-    train_size = len(full_dataset) - val_size
-    train_ds, val_ds = random_split(
-        full_dataset,
-        [train_size, val_size],
-        generator=torch.Generator().manual_seed(cfg["training"]["seed"]),
-    )
-    # Val uses test-time transforms
-    val_ds.dataset = OcclusionDataset(
-        csv_path=data_cfg["train_csv"],
-        img_root=data_cfg["img_root"],
-        transform=get_transforms(train=False, img_size=data_cfg["img_size"]),
-    )
+    val_strategy = str(data_cfg.get("val_split_strategy", "random")).lower()
+    if val_strategy == "random":
+        val_size = int(len(full_dataset) * data_cfg["val_split"])
+        train_size = len(full_dataset) - val_size
+        train_ds, val_ds = random_split(
+            full_dataset,
+            [train_size, val_size],
+            generator=torch.Generator().manual_seed(cfg["training"]["seed"]),
+        )
+        # Val uses test-time transforms
+        val_ds.dataset = OcclusionDataset(
+            csv_path=data_cfg["train_csv"],
+            img_root=data_cfg["img_root"],
+            transform=get_transforms(train=False, img_size=data_cfg["img_size"]),
+        )
+    else:
+        # Stratified split: val mirrors the gender-balanced test set so the val
+        # score faithfully predicts the leaderboard. Subset keeps `.indices`,
+        # which the balanced sampler relies on.
+        from data_challenge.data.splits import make_val_indices
+
+        train_idx, val_idx = make_val_indices(full_dataset.df, data_cfg, cfg["training"]["seed"])
+        val_dataset = OcclusionDataset(
+            csv_path=data_cfg["train_csv"],
+            img_root=data_cfg["img_root"],
+            transform=get_transforms(train=False, img_size=data_cfg["img_size"]),
+        )
+        train_ds = Subset(full_dataset, train_idx)
+        val_ds = Subset(val_dataset, val_idx)
+        train_size, val_size = len(train_idx), len(val_idx)
+        logger.info(
+            "Val split strategy: %s (val female ratio=%s)",
+            val_strategy, data_cfg.get("val_female_ratio", 0.5),
+        )
 
     train_loader = create_train_loader(train_ds, full_dataset, cfg)
     val_loader = DataLoader(

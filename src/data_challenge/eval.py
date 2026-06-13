@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset, random_split
 
 from data_challenge.data.dataset import OcclusionDataset, get_transforms
 from data_challenge.models import build_model
@@ -42,13 +42,23 @@ def _run_val(model, cfg, data_cfg, transform, device, logger, save_val_preds: bo
         img_root=data_cfg["img_root"],
         transform=transform,
     )
-    val_size = int(len(full_ds) * data_cfg["val_split"])
-    train_size = len(full_ds) - val_size
-    _, val_ds = random_split(
-        full_ds,
-        [train_size, val_size],
-        generator=torch.Generator().manual_seed(cfg["training"]["seed"]),
-    )
+    val_strategy = str(data_cfg.get("val_split_strategy", "random")).lower()
+    if val_strategy == "random":
+        val_size = int(len(full_ds) * data_cfg["val_split"])
+        train_size = len(full_ds) - val_size
+        _, val_ds = random_split(
+            full_ds,
+            [train_size, val_size],
+            generator=torch.Generator().manual_seed(cfg["training"]["seed"]),
+        )
+    else:
+        # Must match train.py exactly so the reported val score lines up with
+        # the score the checkpoint was selected on.
+        from data_challenge.data.splits import make_val_indices
+
+        _, val_idx = make_val_indices(full_ds.df, data_cfg, cfg["training"]["seed"])
+        val_ds = Subset(full_ds, val_idx)
+    val_size = len(val_ds)
 
     loader = DataLoader(
         val_ds,
