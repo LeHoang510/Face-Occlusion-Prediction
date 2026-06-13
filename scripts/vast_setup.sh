@@ -55,7 +55,7 @@ if [[ -z "$SYS_PYTHON" ]]; then
 [setup] ERROR: no system Python with a working torch + CUDA was found.
 [setup] This image probably doesn't have torch pre-installed.
 [setup] Pick a vast.ai image with torch baked in, e.g.:
-[setup]   pytorch/pytorch:2.6.0-cuda12.8-cudnn9-devel
+[setup]   pytorch/pytorch:2.6.0-cuda12.6-cudnn9-devel
 [setup]   pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel
 [setup] Override with: ./scripts/cluster_exec.sh vast launch <ask> --image <img>
 EOF
@@ -71,7 +71,7 @@ echo "[setup] container torch:  $SYS_TORCH (built for CUDA $SYS_TORCH_CUDA)"
 # Older pytorch/* images still work via our FP8 shim, but 2.6+ is preferred.
 if ! "$SYS_PYTHON" -c "import torch; assert hasattr(torch, 'float8_e8m0fnu')" 2>/dev/null; then
   echo "[setup] WARN: torch $SYS_TORCH lacks float8_e8m0fnu (need 2.6+ for native FP8)."
-  echo "[setup]        Training will use an FP8 compat shim; prefer image pytorch/pytorch:2.6.0-cuda12.8-cudnn9-devel"
+  echo "[setup]        Training will use an FP8 compat shim; prefer image pytorch/pytorch:2.6.0-cuda12.6-cudnn9-devel"
 fi
 
 # ---------------------------------------------------------------------------

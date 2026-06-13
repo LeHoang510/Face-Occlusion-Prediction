@@ -142,10 +142,11 @@ EOF
       ;;
     launch)
       # Usage: vast launch <ask-id> [--image <img>] [--disk <GB>]
-      # VAST_IMAGE env var overrides --image. Defaults to a cuda12.8 image
-      # (driver host on the offers we now filter for supports CUDA >= 12.6).
+      # VAST_IMAGE env var overrides --image. Defaults to torch 2.6 + CUDA 12.6
+      # (no 2.6.0-cuda12.8 tag on Docker Hub; CUDA 12.8 images start at torch 2.7+).
+      # Driver filter cuda_max_good>=12.6 still matches hosts that run this image.
       local ask="${1:?vast launch: need an ask/offer id}"; shift || true
-      local image="${VAST_IMAGE:-pytorch/pytorch:2.6.0-cuda12.8-cudnn9-devel}"
+      local image="${VAST_IMAGE:-pytorch/pytorch:2.6.0-cuda12.6-cudnn9-devel}"
       local disk="80"
       while [[ $# -gt 0 ]]; do
         case "$1" in
